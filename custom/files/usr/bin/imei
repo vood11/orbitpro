@@ -25,8 +25,12 @@ imei(){
 	if [[ "$IMEI" =~ "^[0-9]+$" ]] && [ ${#IMEI} -eq 15 ]; then
 		atcmd "AT*MRD_IMEI=$CMD,0101,12NOV2010,$IMEI" >> /dev/null 2>&1
 		case "$CMD" in
-			U|u) TITLE="Update" ;;
-			W|w) TITLE="Write" ;;
+			U|u)
+				TITLE="Update"
+			;;
+			W|w)
+				TITLE="Write"
+			;;
 		esac
 		echo "$TITLE Done"
 	else
@@ -44,9 +48,18 @@ status(){
 }
 
 case "$1" in
-	H|h) help ;;
-	D|d) delete ;;
-	U|u|W|w) imei ;;
-	R|r|\?) status ;;
-	""|*) echo "Enter H For More Details" ;;
+	H|h)
+		help
+	;;
+	D|d) delete
+	;;
+	U|u|W|w)
+		imei
+	;;
+	R|r|\?)
+		status
+	;;
+	""|*)
+		echo "Enter H For More Details"
+	;;
 esac

@@ -16,6 +16,13 @@ help(){
 	printf "<PN>: Your PN\n"
 }
 
+check(){
+	if [ -z "$MEP" ]; then
+		echo "MEP Not Found"
+		exit 0
+	fi
+}
+
 read(){
 	check
 	echo -e "Read Success"
@@ -48,25 +55,36 @@ test(){
 status(){
 	CHECK=$(atcmd "AT+CLCK=PN,2" | awk -F: '{print $2}' | xargs)
 	case "$CHECK" in
-		0) STATUS="Unlock" ;;
-		1) STATUS="Lock" ;;
+		0)
+			STATUS="Unlock"
+		;;
+		1)
+			STATUS="Lock"
+		;;
 	esac
 	echo "Status: $STATUS"
 }
 
-check(){
-	if [ -z "$MEP" ]; then
-		echo "MEP Not Found"
-		exit 0
-	fi
-}
-
 case "$1" in
-	H|h) help ;;
-	R|r) read ;;
-	U|u) unlock ;;
-	L|l) lock ;;
-	T|t) test ;;
-	\?) status ;;
-	*) echo "Enter H For More Details" ;;
+	H|h)
+		help
+	;;
+	R|r)
+		read
+	;;
+	U|u)
+		unlock
+	;;
+	L|l)
+		lock
+	;;
+	T|t)
+		test
+	;;
+	\?)
+		status
+	;;
+	*)
+		echo "Enter H For More Details"
+	;;
 esac

@@ -8,11 +8,11 @@ CMD="$@"
 help(){
 	printf "Usage: `basename $0` <Command>\n\n"
 	printf "<Command>:\n"
-	printf "| env\n"
-	printf "| getprop\n"
-	printf "| ifconfig\n"
-	printf "| jffs2reset -y\n"
-	printf "| reboot\n"
+	printf "- env\n"
+	printf "- getprop\n"
+	printf "- ifconfig\n"
+	printf "- jffs2reset -y\n"
+	printf "- reboot\n"
 }
 
 run(){
@@ -20,7 +20,13 @@ run(){
 }
 
 case "$1" in
-	"") echo "Enter H For More Details" ;;
-	H|h) help ;;
-	*) run ;;
+	"")
+		echo "Enter H For More Details"
+	;;
+	H|h)
+		help
+	;;
+	*)
+		run
+	;;
 esac

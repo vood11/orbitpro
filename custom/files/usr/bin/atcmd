@@ -10,6 +10,10 @@ run(){
 }
 
 case "$1" in
-	"") echo "Usage: `basename $0` <AT Command>" ;;
-	*) run ;;
+	"")
+		echo "Usage: `basename $0` <AT Command>"
+	;;
+	*)
+		run
+	;;
 esac

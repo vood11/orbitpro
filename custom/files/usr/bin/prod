@@ -20,16 +20,28 @@ change(){
 check(){
 	PROD=$(atcmd "AT*PROD?" | awk -F: '{print $2}' | xargs)
 	case "$PROD" in
-		0) RESULT="Disabled" ;;
-		1|2) RESULT="Enabled" ;;
+		0)
+			RESULT="Disabled"
+		;;
+		1|2)
+			RESULT="Enabled"
+		;;
 	esac
-	printf "Status: $RESULT\n\n"
-	printf "Note: Reboot Is Needed After Changing Production Mode\nType reboot In Modem Command And Run"
+	echo "Status: $RESULT\n"
+	echo "Note: Reboot Is Needed After Changing Production Mode"
 }
 
 case "$1" in
-	H|h) help ;;
-	0|1|2) change ;;
-	\?) check ;;
-	*) echo "Enter H For More Details" ;;
+	H|h)
+		help
+	;;
+	0|1|2)
+		change
+	;;
+	\?)
+		check
+	;;
+	*)
+		echo "Enter H For More Details"
+	;;
 esac

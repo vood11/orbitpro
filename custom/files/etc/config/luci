@@ -51,11 +51,6 @@ config command
 	option param '1'
 
 config command
-	option name 'SMS Storage'
-	option command 'sms'
-	option param '1'
-
-config command
 	option name 'Modem Command'
 	option command 'atexe'
 	option param '1'

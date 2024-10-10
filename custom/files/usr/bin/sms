@@ -15,8 +15,12 @@ help(){
 change(){
 	atcmd "AT%EXE=\"printf 'config SMS SMS\noption report 0\noption save_location $CMD\noption over_mode 0\noption validity 143\noption center_num N'>/etc/config/smsconfig"\" >> /dev/null 2>&1
 	case "$CMD" in
-		0) STORAGE="Device" ;;
-		1) STORAGE="Sim" ;;
+		0)
+			STORAGE="Device"
+		;;
+		1)
+			STORAGE="Sim"
+		;;
 	esac
 	echo "Location: $STORAGE"
 }
@@ -26,8 +30,16 @@ check(){
 }
 
 case "$1" in
-	H|h) help ;;
-	0|1) change ;;
-	\?) check ;;
-	*) echo "Enter H For More Details" ;;
+	H|h)
+		help
+	;;
+	0|1)
+		change
+	;;
+	\?)
+		check
+	;;
+	*)
+		echo "Enter H For More Details"
+	;;
 esac
