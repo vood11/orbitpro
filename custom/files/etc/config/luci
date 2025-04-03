@@ -31,23 +31,23 @@ config internal 'apply'
 	option display '1.5'
 
 config command
-	option name 'Cell Lock'
-	option command 'celllock'
-	option param '1'
-
-config command
-	option name 'Production Mode'
-	option command 'prod'
-	option param '1'
-
-config command
-	option name 'Change IMEI'
+	option name 'IMEI Change'
 	option command 'imei'
 	option param '1'
 
 config command
-	option name 'Openline'
+	option name 'MEP Unlock'
 	option command 'mep'
+	option param '1'
+
+config command
+	option name 'PIPE Mode'
+	option command 'pipe'
+	option param '1'
+
+config command
+	option name 'Cell Lock'
+	option command 'celllock'
 	option param '1'
 
 config command

@@ -16,11 +16,12 @@ on:
         options:
           - openwrt-22.03
           - openwrt-23.05
+          - openwrt-24.10
       config_file:
         description: "Config Name"
         type: choice
         options:
-          - r281
+          - openwrt.config
       config_link:
         description: "Use Config URL"
         type: boolean
@@ -33,8 +34,8 @@ on:
         description: "DIY Script"
         type: choice
         options:
-          - diy_v1
-          - diy_v2
+          - diy_v1.sh
+          - diy_v2.sh
       firmware_release:
         description: "Firmware Release"
         type: boolean
@@ -54,10 +55,10 @@ env:
   SOURCE_BRANCH: ${{ github.event.inputs.branch }}
   FEEDS_SH: feeds.sh
   FEEDS_PKG_SH: feeds_pkg.sh
-  CONFIG_FILE: ${{ github.event.inputs.config_file }}.config
+  CONFIG_FILE: ${{ github.event.inputs.config_file }}
   CONFIG_LINK: ${{ github.event.inputs.config_link }}
   CONFIG_URL: ${{ github.event.inputs.config_url }}
-  DIY_SH: ${{ github.event.inputs.diy }}.sh
+  DIY_SH: ${{ github.event.inputs.diy }}
   FIRMWARE_RELEASE: ${{ github.event.inputs.firmware_release }}
   TOOLCHAIN_RELEASE: ${{ github.event.inputs.toolchain_release }}
   TOOLCHAIN_REBUILD: ${{ github.event.inputs.toolchain_rebuild }}
@@ -121,7 +122,7 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           git remote add upstream $SOURCE_ORIGIN
-          git fetch --all
+          git fetch upstream $SOURCE_BRANCH
           git merge upstream/$SOURCE_BRANCH
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
@@ -171,7 +172,7 @@ jobs:
 
       - name: Get Release Hash
         continue-on-error: true
-        uses: robinraju/release-downloader@v1.11
+        uses: robinraju/release-downloader@v1.12
         with:
           repository: ${{ GITHUB.REPOSITORY }}
           tag: ${{ env.TOOLCHAIN_TAG }}
@@ -326,7 +327,7 @@ jobs:
 
       - name: Download Toolchain Image From Release
         if: ${{ env.TOOLCHAIN_RELEASE == 'true' }}
-        uses: robinraju/release-downloader@v1.11
+        uses: robinraju/release-downloader@v1.12
         with:
           repository: ${{ GITHUB.REPOSITORY }}
           tag: ${{ env.TOOLCHAIN_TAG }}
@@ -350,7 +351,7 @@ jobs:
           cd $OPENWRT_ROOT_PATH
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git fetch --all
+          git fetch upstream $SOURCE_BRANCH
           git merge upstream/$SOURCE_BRANCH
 
       - name: Load Custom Feeds
