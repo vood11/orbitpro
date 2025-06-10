@@ -177,17 +177,17 @@ jobs:
         continue-on-error: true
         uses: robinraju/release-downloader@v1.12
         with:
-          repository: ${{ GITHUB.REPOSITORY }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
           token: ${{ env.TOKEN }}
+          repository: ${{ GITHUB.REPOSITORY }}
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
+          tag: ${{ env.TOOLCHAIN_TAG }}
 
       - name: Compare Toolchain Hash
         id: hash
         run: |
           if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
             export CACHE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-            echo "CACHE_HASH is $CACHE_HASH"
+            echo "Cached hash is $CACHE_HASH"
           else
             echo "No cached hash found"
           fi
@@ -270,14 +270,14 @@ jobs:
         if: ${{ env.TOOLCHAIN_RELEASE == 'true' && env.REBUILD_CHECK == 'true' }}
         uses: ncipollo/release-action@v1
         with:
-          name: toolchain-image
-          allowUpdates: true
-          replacesArtifacts: true
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          commit: ${{ env.CURRENT_BRANCH }}
           token: ${{ env.TOKEN }}
+          name: toolchain-image
+          commit: ${{ env.CURRENT_BRANCH }}
+          tag: ${{ env.TOOLCHAIN_TAG }}
           artifacts: output/*
-          draft: false
+          replacesArtifacts: true
+          allowUpdates: true
+          prerelease: true
 
   Build:
     needs: [Toolchain]
@@ -340,11 +340,11 @@ jobs:
         if: ${{ env.TOOLCHAIN_RELEASE == 'true' }}
         uses: robinraju/release-downloader@v1.12
         with:
-          repository: ${{ GITHUB.REPOSITORY }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
-          out-file-path: workspace
           token: ${{ env.TOKEN }}
+          repository: ${{ GITHUB.REPOSITORY }}
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
+          tag: ${{ env.TOOLCHAIN_TAG }}
+          out-file-path: workspace
 
       - name: Prepare Toolchain Image
         run: |
@@ -448,34 +448,25 @@ jobs:
         if: ${{ env.FIRMWARE_RELEASE == 'true' }}
         run: |
           cd $OPENWRT_ROOT_PATH/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET
-          rm -rf packages
+          rm -rf packages feeds.buildinfo profiles.json version.buildinfo
           df -hT $PWD
-
-      - name: Delete Old Firmware Assets
-        if: ${{ env.FIRMWARE_RELEASE == 'true' }}
-        uses: mknejp/delete-release-assets@v1
-        with:
-          token: ${{ env.TOKEN }}
-          tag: ${{ env.DEVICE_TARGET }}-${{ env.DEVICE_SUBTARGET }}
-          fail-if-no-assets: false
-          fail-if-no-release: false
-          assets: "*"
 
       - name: Deploy Files To Release
         if: ${{ env.FIRMWARE_RELEASE == 'true' }}
         uses: ncipollo/release-action@v1
         with:
           token: ${{ env.TOKEN }}
-          name: ${{ env.SOURCE_REPO }}-${{ env.BUILD_DATE }}
+          name: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}
           commit: ${{ env.CURRENT_BRANCH }}
-          tag: ${{ env.SOURCE_REPO }}-${{ env.BUILD_DATE }}
+          tag: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
-          allowUpdates: true
           replacesArtifacts: true
-          draft: false
+          allowUpdates: true
+          prerelease: false
           body: |
             ### Build Information
-            - Source Code: ${{ env.SOURCE_ORIGIN }}
+            ---
+            - Source Code: ${{ env.SOURCE_URL }}
             - Source Code Branch: ${{ env.SOURCE_BRANCH }}
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Target: ${{ env.DEVICE_TARGET }}

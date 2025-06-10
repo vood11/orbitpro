@@ -16,11 +16,11 @@ do
   if [ "$BAND" = "2g" ];then
     uci set wireless.default_"$RADIO".ssid="Notion-${MD5}"
     uci set wireless.default_"$RADIO".ifname="wifi-2g"
-    uci set wireless."$RADIO".channel="11"
+    # uci set wireless."$RADIO".channel="1"
   else
     uci set wireless.default_"$RADIO".ssid="Notion-${MD5}-5G"
     uci set wireless.default_"$RADIO".ifname="wifi-5g"
-    uci set wireless."$RADIO".channel="36"
+    # uci set wireless."$RADIO".channel="36"
   fi
   uci set wireless.default_"$RADIO".encryption="psk2"
   uci set wireless.default_"$RADIO".key="OP${MD5}"
