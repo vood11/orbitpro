@@ -1,6 +1,6 @@
 # Notion R281
 
-Building OpenWrt/LEDE With Github Actions
+Building OpenWrt/LEDE With Github Actions for R281 Router.
 
 
 ## Credits
