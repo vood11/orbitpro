@@ -125,7 +125,7 @@
 		"finalize": "AT+ZDHCPLEASE=0",
 		"disconnect": "AT+ZGACT=0,1"
 	},
-	"notion": {
+	"orbitpro": {
 		"initialize": [
 			"AT*APPOWERIND=0",
 			"AT+CFUN=1"
