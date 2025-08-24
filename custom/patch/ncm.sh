@@ -91,8 +91,8 @@ proto_ncm_setup() {
 
 	start=$(date +%s)
 	while true; do
-		if [ -f "/etc/R281_README" ];then
-			manufacturer="notion"
+		if [ -f "/etc/HKM281_README" ];then
+			manufacturer="orbitpro"
 		else
 			manufacturer=$(gcom -d "$device" -s /etc/gcom/getcardinfo.gcom | awk -v RS='\r?\n' 'NF && $0 !~ /AT\+CGMI/ { sub(/\+CGMI: /,""); print tolower($1); exit; }')
 		fi
