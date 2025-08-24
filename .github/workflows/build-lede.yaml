@@ -18,7 +18,7 @@ on:
         description: "Source Branch"
         type: string
         required: true
-        default: "https://github.com/0x4C334E3438/lede"
+        default: "https://github.com/vood11/lede"
       branch:
         description: "Source Branch"
         type: choice
