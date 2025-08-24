@@ -18,7 +18,7 @@ on:
         description: "Source Branch"
         type: string
         required: true
-        default: "https://github.com/0x4C334E3438/openwrt"
+        default: "https://github.com/vood11/openwrt"
       branch:
         description: "Source Branch"
         type: choice
