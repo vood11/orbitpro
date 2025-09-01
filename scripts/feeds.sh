@@ -9,7 +9,7 @@ src-git small_package https://github.com/vood11/small-package
 # Extra Packages
 src-git 3ginfo_lite https://github.com/4IceG/luci-app-3ginfo-lite
 src-git lite_watchdog https://github.com/4IceG/luci-app-lite-watchdog
-src-git my_pkg https://github.com/0x4C334E3438/My_PKG
+src-git my_pkg https://github.com/vood11/My_PKG
 src-git modemband https://github.com/4IceG/luci-app-modemband
 src-git modemdefine https://github.com/4IceG/luci-app-modemdefine
 src-git sms_tool https://github.com/4IceG/luci-app-sms-tool
