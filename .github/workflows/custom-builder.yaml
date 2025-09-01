@@ -31,6 +31,8 @@ on:
         type: choice
         options:
           - openwrt.config
+          - openwrt.config-oc
+          - openwrt.config-passwall
       config_link:
         description: "Use Config URL"
         type: boolean
