@@ -1,6 +1,6 @@
-# Notion R281
+# Orbit Pro HKM281
 
-Building OpenWrt/LEDE With Github Actions for R281 Router.
+Building OpenWrt/LEDE With Github Actions for Orbit Pro HKM281 Router.
 
 
 ## Credits
