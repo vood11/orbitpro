@@ -185,11 +185,6 @@ jobs:
               ;;
           esac
 
-      - name: Cleanup Before Download
-        run: |
-          cd workspace
-          rm -rf openwrt
-
       - name: Download Toolchain Image From Release
         uses: robinraju/release-downloader@v1.12
         with:
