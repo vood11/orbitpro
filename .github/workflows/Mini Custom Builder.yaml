@@ -84,6 +84,17 @@ jobs:
   Build:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    outputs:
+      OPENWRT_ROOT_PATH: ${{ steps.clone.outputs.OPENWRT_ROOT_PATH }}
+      SOURCE_OWNER: ${{ steps.env.outputs.SOURCE_OWNER }}
+      SOURCE_REPO: ${{ steps.env.outputs.SOURCE_REPO }}
+      CURRENT_BRANCH: ${{ steps.env.outputs.CURRENT_BRANCH }}
+      DEVICE_NAME: ${{ steps.env.outputs.DEVICE_NAME }}
+      DEVICE_PLATFORM: ${{ steps.env.outputs.DEVICE_PLATFORM }}
+      DEVICE_TARGET: ${{ steps.env.outputs.DEVICE_TARGET }}
+      DEVICE_SUBTARGET: ${{ steps.env.outputs.DEVICE_SUBTARGET }}
+      TOOLCHAIN_IMAGE: ${{ steps.env.outputs.TOOLCHAIN_IMAGE }}
+      BUILD_DATE: ${{ steps.env.outputs.BUILD_DATE }}
 
     steps:
       - name: Initialize Environment
@@ -106,17 +117,6 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Checkout repository files
-        uses: actions/checkout@v4
-
-      - name: Cache Apt Packages
-        uses: actions/cache@v4
-        with:
-          path: /var/cache/apt/archives
-          key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/workflow.yml') }}
-          restore-keys: |
-            ${{ runner.os }}-apt-cache-
-
       - name: Install Packages
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -137,47 +137,38 @@ jobs:
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           df -hT
-      
-      - name: Set Custom Build Information
-        run: |
-          echo "Setting custom build information..."
-          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
-          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
-          echo "Build user set to: dbai"
-          echo "Build host set to: tim-mawar"
-          echo "Build date set to: 4 Mei 1998"
-
-      - name: Prepare .config for Variable Generation
-        run: |
-          if [[ "${{ env.CONFIG_LINK }}" == "true" && -n "${{ env.CONFIG_URL }}" ]]; then
-            curl -fsSL ${{ env.CONFIG_URL }} -o .config
-          else
-            cp ./config/${{ env.CONFIG_FILE }} .config
-          fi
 
       - name: Generate Variables
         id: env
         run: |
           export SOURCE_OWNER=$(echo $SOURCE_URL | awk -F '/' '{print $(NF-1)}')
           echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_ENV
+          echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_OUTPUT
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-          
+          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
+          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
+          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+          cd $OPENWRT_ROOT_PATH
           export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
+          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
           export DEVICE_PLATFORM=$(grep 'CONFIG_TARGET_ARCH_PACKAGES' .config | awk -F '"' '{print $2}')
           echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_ENV
+          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_OUTPUT
           export DEVICE_TARGET=$(grep 'CONFIG_TARGET_BOARD' .config | awk -F '"' '{print $2}')
           echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
+          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_OUTPUT
           export DEVICE_SUBTARGET=$(grep 'CONFIG_TARGET_SUBTARGET' .config | awk -F '"' '{print $2}')
           echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
-          
+          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
           export TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
           echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
-          
+          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
           export BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
 
       - name: Generate Release Suffix
         id: suffix
@@ -194,11 +185,16 @@ jobs:
               ;;
           esac
 
+      - name: Cleanup Before Download
+        run: |
+          cd workspace
+          rm -rf openwrt
+
       - name: Download Toolchain Image From Release
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ github.repository }}
+          repository: ${{ GITHUB.REPOSITORY }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
@@ -215,50 +211,39 @@ jobs:
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
-          echo "OPENWRT_ROOT_PATH=$PWD/openwrt" >> $GITHUB_ENV
 
       - name: Update Source Code
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}
+          cd $OPENWRT_ROOT_PATH
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git remote add upstream ${{ env.SOURCE_ORIGIN }}
-          git fetch upstream ${{ env.SOURCE_BRANCH }}
-          git merge upstream/${{ env.SOURCE_BRANCH }}
+          git fetch upstream $SOURCE_BRANCH
+          git merge upstream/$SOURCE_BRANCH
 
       - name: Load Custom Feeds
         run: |
-          cp $GITHUB_WORKSPACE/scripts/${{ env.FEEDS_SH }} ${{ env.OPENWRT_ROOT_PATH }}/
-          cd ${{ env.OPENWRT_ROOT_PATH }}
-          chmod +x ./${{ env.FEEDS_SH }} && ./${{ env.FEEDS_SH }}
+          cp ./scripts/$FEEDS_SH $OPENWRT_ROOT_PATH/$FEEDS_SH
+          cd $OPENWRT_ROOT_PATH
+          chmod +x ./$FEEDS_SH && ./$FEEDS_SH
 
       - name: Install Feeds
         run: |
-          cp $GITHUB_WORKSPACE/scripts/${{ env.FEEDS_PKG_SH }} ${{ env.OPENWRT_ROOT_PATH }}/
-          cd ${{ env.OPENWRT_ROOT_PATH }}
+          cp ./scripts/$FEEDS_PKG_SH $OPENWRT_ROOT_PATH/$FEEDS_PKG_SH
+          cd $OPENWRT_ROOT_PATH
           ./scripts/feeds clean
           ./scripts/feeds update -a
-          chmod +x ./${{ env.FEEDS_PKG_SH }} && ./${{ env.FEEDS_PKG_SH }}
+          chmod +x ./$FEEDS_PKG_SH && ./$FEEDS_PKG_SH
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Load Custom Configuration
-        run: |
-          cp $GITHUB_WORKSPACE/.config ${{ env.OPENWRT_ROOT_PATH }}/.config
-          cd ${{ env.OPENWRT_ROOT_PATH }}
-          make defconfig
-          mkdir -p bin
-          cp .config ./bin/build.config
-          
       - name: Replace Vermagic
         if: ${{ env.VERMAGIC == 'true' }}
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}
           snapshot_version="${SOURCE_BRANCH#openwrt-}"
           release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
             | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
             | cut -d'"' -f4 | sed 's/^v//')
-          if [[ "${{ env.VERMAGIC_OPT }}" == "true" ]]; then
+          if [[ "$VERMAGIC_OPT" == "true" ]]; then
             version="${snapshot_version}-SNAPSHOT"
           else
             version="${release_version}"
@@ -266,14 +251,25 @@ jobs:
           kmods=$(curl -s https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/ \
             | grep -oP '<td class="n"><a href="\K[^/]+|<td class="d">\K[^<]+' \
             | paste -d '|' - - | sort -t '|' -k2 | head -n1 | cut -d '|' -f1)
-          
-          echo "src/gz openwrt_kmods https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/${kmods}" >> $GITHUB_WORKSPACE/custom/files/etc/opkg/customfeeds.conf
-          
+          echo "src/gz openwrt_kmods https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/${kmods}" >> ./custom/files/etc/opkg/customfeeds.conf
+          cd $OPENWRT_ROOT_PATH
           grep -q '^CONFIG_VERSION_REPO=' ./.config \
             && sed -i "s|^CONFIG_VERSION_REPO=.*|CONFIG_VERSION_REPO=\"https://downloads.openwrt.org/releases/${version}\"|" ./.config \
             || echo -e "\nCONFIG_VERSION_REPO=\"https://downloads.openwrt.org/releases/${version}\"" >> ./.config
           echo "$kmods" | sed 's/.*-//' > .vermagic
           sed -i -e 's/^\(.\).*vermagic$/\1cp $(TOPDIR)\/.vermagic $(LINUX_DIR)\/.vermagic/' ./include/kernel-defaults.mk
+
+      - name: Load Custom Configuration
+        run: |
+          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
+            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
+          else
+            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
+          fi
+          cd $OPENWRT_ROOT_PATH
+          make defconfig
+          mkdir bin
+          cp .config ./bin/build.config
 
       - name: Upload Config To Artifact
         uses: actions/upload-artifact@v4
@@ -284,15 +280,15 @@ jobs:
 
       - name: Load DIY
         run: |
-          cp $GITHUB_WORKSPACE/scripts/${{ env.DIY_SH }} ${{ env.OPENWRT_ROOT_PATH }}/
-          mv $GITHUB_WORKSPACE/custom ${{ env.OPENWRT_ROOT_PATH }}/
-          cd ${{ env.OPENWRT_ROOT_PATH }}
-          chmod +x ./${{ env.DIY_SH }} && ./${{ env.DIY_SH }}
+          cp ./scripts/$DIY_SH $OPENWRT_ROOT_PATH/
+          mv ./custom $OPENWRT_ROOT_PATH/
+          cd $OPENWRT_ROOT_PATH
+          chmod +x ./$DIY_SH && ./$DIY_SH
 
       - name: Download Packages
         timeout-minutes: 30
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}
+          cd $OPENWRT_ROOT_PATH
           retry_count=0
           until make download -j10 || [ $retry_count -ge $MAX_RETRIES ]; do
             retry_count=$((retry_count+1))
@@ -305,7 +301,7 @@ jobs:
       - name: Compile Packages
         timeout-minutes: 180
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}
+          cd $OPENWRT_ROOT_PATH
           echo -e "$(nproc) Thread Compile"
           make clean
           make buildinfo
@@ -318,7 +314,7 @@ jobs:
       - name: Generate Firmware
         timeout-minutes: 60
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}
+          cd $OPENWRT_ROOT_PATH
           make package/install -j$(($(nproc) + 1)) || make package/install -j1 V=s
           make target/install -j$(($(nproc) + 1)) || make target/install -j1 V=s
           make json_overview_image_info
@@ -334,7 +330,7 @@ jobs:
       - name: Organize Files
         if: ${{ env.FIRMWARE_RELEASE == 'true' }}
         run: |
-          cd ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}
+          cd $OPENWRT_ROOT_PATH/bin/targets/$DEVICE_TARGET/$DEVICE_SUBTARGET
           rm -rf packages feeds.buildinfo profiles.json version.buildinfo
           df -hT $PWD
 
@@ -344,7 +340,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           name: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
-          commit: ${{ github.sha }}
+          commit: ${{ env.CURRENT_BRANCH }}
           tag: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
