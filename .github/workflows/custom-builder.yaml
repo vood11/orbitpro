@@ -387,7 +387,7 @@ jobs:
             ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
-          show-log: true
+          fail-if-not-found: false
 
       - name: Prepare Toolchain Image
         if: ${{ steps.toolchain.outcome == 'skipped' }}
