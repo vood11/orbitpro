@@ -167,6 +167,16 @@ jobs:
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
+      - name: Set Custom Build Information
+        run: |
+          echo "Setting custom build information..."
+          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
+          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
+          echo "Build user set to: dbai"
+          echo "Build host set to: tim-mawar"
+          echo "Build date set to: 4 Mei 1998"
+
       - name: Setup ccache
         run: |
           mkdir -p ~/.ccache
@@ -434,16 +444,6 @@ jobs:
           mv ./custom $OPENWRT_ROOT_PATH/
           cd $OPENWRT_ROOT_PATH
           chmod +x ./$DIY_SH && ./$DIY_SH
-
-      - name: Set Custom Build Information
-        run: |
-          echo "Setting custom build information..."
-          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
-          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
-          echo "Build user set to: dbai"
-          echo "Build host set to: tim-mawar"
-          echo "Build date set to: 4 Mei 1998"
 
       - name: Download Packages
         timeout-minutes: 30
