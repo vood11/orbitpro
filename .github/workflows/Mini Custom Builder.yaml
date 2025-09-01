@@ -4,7 +4,7 @@
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
-name: Test Builder
+name: Mini Custom Builder
 
 permissions:
   contents: write
@@ -52,10 +52,6 @@ on:
         description: "Firmware Release"
         type: boolean
         default: true
-      toolchain_rebuild:
-        description: "Rebuild Toolchain"
-        type: boolean
-        default: false
       vermagic:
         description: "Replace Vermagic"
         type: boolean
@@ -76,7 +72,6 @@ env:
   CONFIG_URL: ${{ github.event.inputs.config_url }}
   DIY_SH: ${{ github.event.inputs.diy }}
   FIRMWARE_RELEASE: ${{ github.event.inputs.firmware_release }}
-  TOOLCHAIN_REBUILD: ${{ github.event.inputs.toolchain_rebuild }}
   TOOLCHAIN_TAG: toolchain
   VERMAGIC: ${{ github.event.inputs.vermagic }}
   VERMAGIC_OPT: ${{ github.event.inputs.vermagic_opt }}
@@ -122,9 +117,6 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Install Packages
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -145,69 +137,6 @@ jobs:
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           df -hT
-
-      - name: Clone Source Code
-        id: clone
-        run: |
-          retry_count=0
-          until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
-            retry_count=$((retry_count+1))
-            echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
-            sleep $RETRY_DELAY
-            rm -rf workspace/openwrt
-          done
-          if [ ! -d "workspace/openwrt" ]; then
-            echo "Failed to clone repository after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          cd workspace/openwrt
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git remote add upstream $SOURCE_ORIGIN
-          git fetch upstream $SOURCE_BRANCH
-          git merge upstream/$SOURCE_BRANCH
-          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
-          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
-
-      - name: Set Custom Build Information
-        run: |
-          echo "Setting custom build information..."
-          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
-          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
-          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
-          echo "Build user set to: dbai"
-          echo "Build host set to: tim-mawar"
-          echo "Build date set to: 4 Mei 1998"
-
-      - name: Setup ccache
-        run: |
-          mkdir -p ~/.ccache
-          echo "export CCACHE_DIR=~/.ccache" >> $GITHUB_ENV
-          echo "export CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "export USE_CCACHE=1" >> $GITHUB_ENV
-          ccache -M 2G
-          ccache -z
-
-      - name: Cache OpenWrt downloads and ccache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.OPENWRT_ROOT_PATH }}/dl
-            ~/.ccache
-          key: openwrt-cache-${{ runner.os }}-${{ env.DEVICE_NAME }}-${{ hashFiles('config/${{ env.CONFIG_FILE }}') }}
-          restore-keys: |
-            openwrt-cache-${{ runner.os }}-${{ env.DEVICE_NAME }}-
-
-      - name: Generate Toolchain Configuration
-        run: |
-          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
-            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
-          else
-            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
-          fi
-          echo -e "\nCONFIG_ALL=y\nCONFIG_ALL_NONSHARED=y" >> $OPENWRT_ROOT_PATH/.config
-          cd $OPENWRT_ROOT_PATH
-          make defconfig
 
       - name: Generate Variables
         id: env
@@ -256,135 +185,21 @@ jobs:
               ;;
           esac
 
-      - name: Get Toolchain Hash
-        id: get_hash
-        continue-on-error: true
-        uses: robinraju/release-downloader@v1.12
-        with:
-          token: ${{ env.TOKEN }}
-          repository: ${{ secrets.GITHUB_REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
-          tag: ${{ env.TOOLCHAIN_TAG }}
-
-      - name: Compare Toolchain Hash
-        id: compare_hash
-        run: |
-          if [ "${{ steps.get_hash.outcome }}" == "success" ]; then
-            echo "RELEASE_HASH=$(cat ${{ env.TOOLCHAIN_IMAGE }}.hash)" >> $GITHUB_ENV
-          else
-            echo "Toolchain hash not found in release. Forcing rebuild."
-            echo "REBUILD_CHECK=true" >> $GITHUB_ENV
-            exit 0
-          fi
-          
-          cd $OPENWRT_ROOT_PATH
-          CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
-          echo "CURRENT_HASH=${CURRENT_HASH}" >> $GITHUB_ENV
-
-          echo "Release Hash: ${{ env.RELEASE_HASH }}"
-          echo "Current Hash: ${CURRENT_HASH}"
-
-          if [ "${{ env.RELEASE_HASH }}" != "${CURRENT_HASH}" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
-            echo "Hashes do not match or rebuild is forced. Rebuilding toolchain."
-            echo "REBUILD_CHECK=true" >> $GITHUB_ENV
-          else
-            echo "Hashes match. Skipping toolchain rebuild."
-          fi
-
-      - name: Install Feeds
-        if: env.REBUILD_CHECK == 'true'
-        run: |
-          echo "Install Feeds Toolchain"
-          cd $OPENWRT_ROOT_PATH
-          ./scripts/feeds clean
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-
-      - name: Load Custom Configuration
-        if: env.REBUILD_CHECK == 'true'
-        run: |
-          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
-            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
-          else
-            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
-          fi
-          cd $OPENWRT_ROOT_PATH
-          make defconfig
-
-      - name: Compile Tools
-        if: env.REBUILD_CHECK == 'true'
-        timeout-minutes: 60
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo -e "$(nproc) Thread Compile"
-          make tools/compile -j$(($(nproc) + 1)) || make tools/compile -j1 V=s
-
-      - name: Compile Toolchain
-        if: env.REBUILD_CHECK == 'true'
-        timeout-minutes: 120
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo -e "$(nproc) Thread Compile"
-          make toolchain/compile -j$(($(nproc) + 1)) || make toolchain/compile -j1 V=s
-          rm -rf .config dl bin
-
-      - name: Generate Toolchain Image
-        id: toolchain
-        if: env.REBUILD_CHECK == 'true'
+      - name: Cleanup Before Download
         run: |
           cd workspace
-          mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
-          mkdir -p $GITHUB_WORKSPACE/output
-          split -d -b 1G $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
-          rm -f $TOOLCHAIN_IMAGE
-          cd $OPENWRT_ROOT_PATH
-          echo ${{ env.CURRENT_HASH }} > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
-          ls -lh $GITHUB_WORKSPACE/output
-
-      - name: Delete Old Toolchain Assets From Release
-        if: env.REBUILD_CHECK == 'true'
-        uses: mknejp/delete-release-assets@v1
-        with:
-          token: ${{ env.TOKEN }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
-          fail-if-no-assets: false
-          fail-if-no-release: false
-
-      - name: Upload Toolchain Image To Release
-        if: env.REBUILD_CHECK == 'true'
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ env.TOKEN }}
-          name: toolchain-image
-          commit: ${{ env.CURRENT_BRANCH }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          artifacts: output/*
-          replacesArtifacts: true
-          allowUpdates: true
-          prerelease: true
-
-      - name: Cleanup
-        run: |
-          cd workspace
-          if [[ "${{ env.REBUILD_CHECK }}" == "true" ]]; then
-            rm -rf $TOOLCHAIN_IMAGE output
-          else
-            rm -rf openwrt
-          fi
+          rm -rf openwrt
 
       - name: Download Toolchain Image From Release
-        if: steps.toolchain.outcome == 'skipped'
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ secrets.GITHUB_REPOSITORY }}
+          repository: ${{ GITHUB.REPOSITORY }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
       - name: Prepare Toolchain Image
-        if: steps.toolchain.outcome == 'skipped'
         run: |
           cd workspace
           for i in {00..09}; do
@@ -420,20 +235,6 @@ jobs:
           chmod +x ./$FEEDS_PKG_SH && ./$FEEDS_PKG_SH
           ./scripts/feeds update -a
           ./scripts/feeds install -a
-
-      - name: Install Pre-built IPK Packages
-        run: |
-          # Create a directory for pre-built packages if it exists in the repo
-          if [ -d "$GITHUB_WORKSPACE/custom_ipk" ]; then
-            echo "Installing pre-built IPK packages..."
-            mkdir -p $OPENWRT_ROOT_PATH/packages/prebuilt
-            cp $GITHUB_WORKSPACE/custom_ipk/*.ipk $OPENWRT_ROOT_PATH/packages/prebuilt/
-            # Update the package index to make the build system aware of the new packages
-            cd $OPENWRT_ROOT_PATH
-            make package/index
-          else
-            echo "No 'custom_ipk' directory found, skipping."
-          fi
 
       - name: Replace Vermagic
         if: ${{ env.VERMAGIC == 'true' }}
