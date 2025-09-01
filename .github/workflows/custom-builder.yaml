@@ -49,7 +49,7 @@ on:
       firmware_release:
         description: "Firmware Release"
         type: boolean
-        default: false
+        default: true
       toolchain_rebuild:
         description: "Rebuild Toolchain"
         type: boolean
@@ -57,11 +57,11 @@ on:
       vermagic:
         description: "Replace Vermagic"
         type: boolean
-        default: false
-      vermagic_opt:
-        description: "SNAPSHOT Vermagic"
-        type: boolean
         default: true
+      vermagic_opt:
+        description: "SNAPSHOT Vermagic (uncheck for stable)"
+        type: boolean
+        default: false
 
 env:
   SOURCE_URL: ${{ github.event.inputs.source }}
