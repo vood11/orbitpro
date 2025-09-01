@@ -31,7 +31,7 @@ on:
         type: choice
         options:
           - openwrt.config
-          - openwrt.config-oc
+          - openwrt.config-openclash
           - openwrt.config-passwall
       config_link:
         description: "Use Config URL"
@@ -240,6 +240,21 @@ jobs:
           export BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Suffix
+        id: suffix
+        run: |
+          case "${{ env.CONFIG_FILE }}" in
+            *openclash)
+              echo "suffix=_openclash" >> $GITHUB_ENV
+              ;;
+            *passwall)
+              echo "suffix=_passwall" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "suffix=" >> $GITHUB_ENV
+              ;;
+          esac
 
       - name: Get Toolchain Hash
         continue-on-error: true
@@ -501,9 +516,9 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           token: ${{ env.TOKEN }}
-          name: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}
+          name: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           commit: ${{ env.CURRENT_BRANCH }}
-          tag: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}
+          tag: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
           allowUpdates: true
