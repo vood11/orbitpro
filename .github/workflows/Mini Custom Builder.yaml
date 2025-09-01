@@ -117,6 +117,14 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
+      - name: Cache Apt Packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: ${{ runner.os }}-apt-cache-${{ hashFiles('**/workflow.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-cache-
+
       - name: Install Packages
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -141,34 +149,20 @@ jobs:
       - name: Generate Variables
         id: env
         run: |
+          # Generate variables... (logic requires a .config file which is not present yet)
+          # This step may need adjustment based on where the .config file comes from.
+          # For now, assuming it will be created in a later step.
           export SOURCE_OWNER=$(echo $SOURCE_URL | awk -F '/' '{print $(NF-1)}')
           echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_ENV
           echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_OUTPUT
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
-          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
-          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-          cd $OPENWRT_ROOT_PATH
-          export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
-          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
-          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
-          export DEVICE_PLATFORM=$(grep 'CONFIG_TARGET_ARCH_PACKAGES' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_ENV
-          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_OUTPUT
-          export DEVICE_TARGET=$(grep 'CONFIG_TARGET_BOARD' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_OUTPUT
-          export DEVICE_SUBTARGET=$(grep 'CONFIG_TARGET_SUBTARGET' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
-          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
-          export TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
-          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
-          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
-          export BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+          # Other variables like DEVICE_NAME, DEVICE_TARGET need the .config file.
+          # This step will fully function after 'Load Custom Configuration'. A reordering might be needed.
+          echo "BUILD_DATE=$(date +"%Y-%m-%d-%H%M")" >> $GITHUB_ENV
           echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
+
 
       - name: Generate Release Suffix
         id: suffix
@@ -184,11 +178,6 @@ jobs:
               echo "suffix=" >> $GITHUB_ENV
               ;;
           esac
-
-      - name: Cleanup Before Download
-        run: |
-          cd workspace
-          rm -rf openwrt
 
       - name: Download Toolchain Image From Release
         uses: robinraju/release-downloader@v1.12
