@@ -1,6 +1,6 @@
 #
 # Copyright (c) 2023 LENAR
-#
+# Copyright (c) 2025 DBAI
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
 #
@@ -128,8 +128,6 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo -E apt-get -qq update
-          # Menghapus paket dokumentasi yang tidak perlu untuk menghindari error instalasi
-          # dan mempercepat proses setup lingkungan build.
           sudo -E apt-get -qq install -y \
             ack antlr3 aria2 autoconf automake autopoint binutils bison \
             btrfs-progs build-essential bzip2 ca-certificates ccache cmake coreutils \
@@ -436,6 +434,16 @@ jobs:
           mv ./custom $OPENWRT_ROOT_PATH/
           cd $OPENWRT_ROOT_PATH
           chmod +x ./$DIY_SH && ./$DIY_SH
+
+      - name: Set Custom Build Information
+        run: |
+          echo "Setting custom build information..."
+          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
+          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
+          echo "Build user set to: dbai"
+          echo "Build host set to: tim-mawar"
+          echo "Build date set to: 4 Mei 1998"
 
       - name: Download Packages
         timeout-minutes: 30
