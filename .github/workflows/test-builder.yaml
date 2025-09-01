@@ -257,6 +257,7 @@ jobs:
           esac
 
       - name: Get Toolchain Hash
+        id: get_hash
         continue-on-error: true
         uses: robinraju/release-downloader@v1.12
         with:
@@ -266,25 +267,32 @@ jobs:
           tag: ${{ env.TOOLCHAIN_TAG }}
 
       - name: Compare Toolchain Hash
+        id: compare_hash
         run: |
-          if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
-            export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-            echo "Toolchain hash is $RELEASE_HASH"
+          if [ "${{ steps.get_hash.outcome }}" == "success" ]; then
+            echo "RELEASE_HASH=$(cat ${{ env.TOOLCHAIN_IMAGE }}.hash)" >> $GITHUB_ENV
           else
-            echo "Toolchain hash not found"
-          fi
-          cd $OPENWRT_ROOT_PATH
-          export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
-          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
-          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
-          echo "Current hash is $CURRENT_HASH"
-          if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+            echo "Toolchain hash not found in release. Forcing rebuild."
             echo "REBUILD_CHECK=true" >> $GITHUB_ENV
-            echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          cd $OPENWRT_ROOT_PATH
+          CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
+          echo "CURRENT_HASH=${CURRENT_HASH}" >> $GITHUB_ENV
+
+          echo "Release Hash: ${{ env.RELEASE_HASH }}"
+          echo "Current Hash: ${CURRENT_HASH}"
+
+          if [ "${{ env.RELEASE_HASH }}" != "${CURRENT_HASH}" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+            echo "Hashes do not match or rebuild is forced. Rebuilding toolchain."
+            echo "REBUILD_CHECK=true" >> $GITHUB_ENV
+          else
+            echo "Hashes match. Skipping toolchain rebuild."
           fi
 
       - name: Install Feeds
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         run: |
           echo "Install Feeds Toolchain"
           cd $OPENWRT_ROOT_PATH
@@ -293,7 +301,7 @@ jobs:
           ./scripts/feeds install -a
 
       - name: Load Custom Configuration
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         run: |
           if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
             curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
@@ -304,7 +312,7 @@ jobs:
           make defconfig
 
       - name: Compile Tools
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         timeout-minutes: 60
         run: |
           cd $OPENWRT_ROOT_PATH
@@ -312,7 +320,7 @@ jobs:
           make tools/compile -j$(($(nproc) + 1)) || make tools/compile -j1 V=s
 
       - name: Compile Toolchain
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         timeout-minutes: 120
         run: |
           cd $OPENWRT_ROOT_PATH
@@ -322,7 +330,7 @@ jobs:
 
       - name: Generate Toolchain Image
         id: toolchain
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         run: |
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
@@ -330,11 +338,11 @@ jobs:
           split -d -b 1G $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
           rm -f $TOOLCHAIN_IMAGE
           cd $OPENWRT_ROOT_PATH
-          echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
+          echo ${{ env.CURRENT_HASH }} > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
 
       - name: Delete Old Toolchain Assets From Release
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         uses: mknejp/delete-release-assets@v1
         with:
           token: ${{ env.TOKEN }}
@@ -344,7 +352,7 @@ jobs:
           fail-if-no-release: false
 
       - name: Upload Toolchain Image To Release
-        if: ${{ env.REBUILD_CHECK == 'true' }}
+        if: env.REBUILD_CHECK == 'true'
         uses: ncipollo/release-action@v1
         with:
           token: ${{ env.TOKEN }}
@@ -359,14 +367,14 @@ jobs:
       - name: Cleanup
         run: |
           cd workspace
-          if [[ "$REBUILD_CHECK" == "true" ]]; then
+          if [[ "${{ env.REBUILD_CHECK }}" == "true" ]]; then
             rm -rf $TOOLCHAIN_IMAGE output
           else
             rm -rf openwrt
           fi
 
       - name: Download Toolchain Image From Release
-        if: ${{ steps.toolchain.outcome == 'skipped' }}
+        if: steps.toolchain.outcome == 'skipped'
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
@@ -376,7 +384,7 @@ jobs:
           out-file-path: workspace
 
       - name: Prepare Toolchain Image
-        if: ${{ steps.toolchain.outcome == 'skipped' }}
+        if: steps.toolchain.outcome == 'skipped'
         run: |
           cd workspace
           for i in {00..09}; do
