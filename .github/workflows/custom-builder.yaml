@@ -333,7 +333,7 @@ jobs:
           mksquashfs openwrt $TOOLCHAIN_IMAGE.img -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
           if [[ "${{ env.SPLIT_TOOLCHAIN }}" == "true" ]]; then
-            echo "Splitting toolchain image..."
+            echo "Splitting toolchain image into 1GB parts..."
             split -d -b 1G $TOOLCHAIN_IMAGE.img $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
             rm -f $TOOLCHAIN_IMAGE.img
           else
@@ -393,12 +393,16 @@ jobs:
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
           cd workspace
-          if [[ "${{ env.SPLIT_TOOLCHAIN }}" == "true" ]]; then
+          # Check if the first split part exists. If so, reconstruct.
+          if [ -f "$TOOLCHAIN_IMAGE.img.00" ]; then
             echo "Reconstructing split toolchain image..."
-            cat $TOOLCHAIN_IMAGE.img.* >> $TOOLCHAIN_IMAGE.img
+            cat $TOOLCHAIN_IMAGE.img.* > $TOOLCHAIN_IMAGE.img
             rm -f $TOOLCHAIN_IMAGE.img.*
-          else
+          elif [ -f "$TOOLCHAIN_IMAGE.img" ]; then
             echo "Using single toolchain image."
+          else
+            echo "Error: No toolchain image found after download."
+            exit 1
           fi
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
