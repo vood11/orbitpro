@@ -179,25 +179,6 @@ jobs:
           echo "Build host set to: tim-mawar"
           echo "Build date set to: 4 Mei 1998"
 
-      - name: Setup ccache
-        run: |
-          mkdir -p ~/.ccache
-          echo "export CCACHE_DIR=~/.ccache" >> $GITHUB_ENV
-          echo "export CCACHE_COMPRESS=1" >> $GITHUB_ENV
-          echo "export USE_CCACHE=1" >> $GITHUB_ENV
-          ccache -M 2G
-          ccache -z
-
-      - name: Cache OpenWrt downloads and ccache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.OPENWRT_ROOT_PATH }}/dl
-            ~/.ccache
-          key: openwrt-cache-${{ runner.os }}-${{ env.DEVICE_NAME }}-${{ hashFiles('config/${{ env.CONFIG_FILE }}') }}
-          restore-keys: |
-            openwrt-cache-${{ runner.os }}-${{ env.DEVICE_NAME }}-
-
       - name: Generate Toolchain Configuration
         run: |
           if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
@@ -261,7 +242,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ secrets.GITHUB_REPOSITORY }}
+          repository: ${{ GITHUB.REPOSITORY }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
           tag: ${{ env.TOOLCHAIN_TAG }}
 
@@ -370,7 +351,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ secrets.GITHUB_REPOSITORY }}
+          repository: ${{ GITHUB.REPOSITORY }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
