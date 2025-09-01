@@ -2,8 +2,8 @@
 
 cat >> ./feeds.conf.default <<EOF
 # Extra Feeds
-# src-git small_package https://github.com/vood11/small-package
-src-git openwrt_packages https://github.com/kenzok8/openwrt-packages
+src-git small_package https://github.com/vood11/small-package
+# src-git openwrt_packages https://github.com/kenzok8/openwrt-packages
 # src-git small https://github.com/kenzok8/small
 
 # Extra Packages
