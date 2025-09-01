@@ -117,6 +117,9 @@ jobs:
           remove-codeql: 'true'
           remove-docker-images: 'true'
 
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Install Packages
         env:
           DEBIAN_FRONTEND: noninteractive
@@ -137,6 +140,29 @@ jobs:
           sudo -E apt-get -qq autoremove --purge
           sudo -E apt-get -qq clean
           df -hT
+
+      - name: Clone Source Code
+        id: clone
+        run: |
+          retry_count=0
+          until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+            retry_count=$((retry_count+1))
+            echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+            sleep $RETRY_DELAY
+            rm -rf workspace/openwrt
+          done
+          if [ ! -d "workspace/openwrt" ]; then
+            echo "Failed to clone repository after $MAX_RETRIES attempts"
+            exit 1
+          fi
+          cd workspace/openwrt
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git remote add upstream $SOURCE_ORIGIN
+          git fetch upstream $SOURCE_BRANCH
+          git merge upstream/$SOURCE_BRANCH
+          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
+          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
       - name: Generate Variables
         id: env
@@ -185,6 +211,11 @@ jobs:
               ;;
           esac
 
+      - name: Cleanup Before Download
+        run: |
+          cd workspace
+          rm -rf openwrt
+
       - name: Download Toolchain Image From Release
         uses: robinraju/release-downloader@v1.12
         with:
@@ -206,6 +237,17 @@ jobs:
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
+
+
+      - name: Set Custom Build Information
+        run: |
+          echo "Setting custom build information..."
+          echo "KBUILD_BUILD_USER=dbai" >> $GITHUB_ENV
+          echo "KBUILD_BUILD_HOST=tim-mawar" >> $GITHUB_ENV
+          echo "SOURCE_DATE_EPOCH=$(date -d '1998-05-04' +%s)" >> $GITHUB_ENV
+          echo "Build user set to: dbai"
+          echo "Build host set to: tim-mawar"
+          echo "Build date set to: 4 Mei 1998"
 
       - name: Update Source Code
         run: |
