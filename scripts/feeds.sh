@@ -7,6 +7,7 @@ src-git small_package https://github.com/vood11/small-package
 # src-git small https://github.com/kenzok8/small
 
 # Extra Packages
+src-git irqbalance https://github.com/4IceG/luci-app-irqbalance
 src-git 3ginfo_lite https://github.com/4IceG/luci-app-3ginfo-lite
 src-git lite_watchdog https://github.com/4IceG/luci-app-lite-watchdog
 src-git my_pkg https://github.com/vood11/My_PKG
