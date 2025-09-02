@@ -33,6 +33,7 @@ on:
           - openwrt.config
           - openwrt.config-openclash
           - openwrt.config-passwall
+          - openwrt.config-custom
       config_link:
         description: "Use Config URL"
         type: boolean
