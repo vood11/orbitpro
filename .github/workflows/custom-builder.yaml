@@ -488,9 +488,9 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           token: ${{ env.TOKEN }}
-          name: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
+          name: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           commit: ${{ env.CURRENT_BRANCH }}
-          tag: ${{ env.SOURCE_REPO }}_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
+          tag: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
           allowUpdates: true
