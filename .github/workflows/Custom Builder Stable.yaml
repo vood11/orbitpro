@@ -161,14 +161,19 @@ jobs:
             exit 1
           fi
           cd workspace/openwrt
-          # Optional: If cloning a tag, you'll be in a 'detached HEAD' state.
-          # The following command creates a local branch, which can be useful.
-          # git checkout -b temp-$SOURCE_BRANCH
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git remote add upstream $SOURCE_ORIGIN
-          git fetch upstream $SOURCE_BRANCH --tags
-          git merge upstream/$SOURCE_BRANCH
+          # If SOURCE_BRANCH is a tag (e.g., v23.05.6), just create a local branch.
+          # Otherwise, if it's a development branch, fetch and merge updates.
+          if [[ $SOURCE_BRANCH == v* ]]; then
+            echo "Cloned from tag $SOURCE_BRANCH. Creating local branch to avoid detached HEAD."
+            git checkout -b temp-$SOURCE_BRANCH
+          else
+            echo "Cloned from branch $SOURCE_BRANCH. Merging from upstream."
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git remote add upstream $SOURCE_ORIGIN
+            git fetch upstream $SOURCE_BRANCH --tags
+            git merge upstream/$SOURCE_BRANCH
+          fi
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
@@ -366,10 +371,20 @@ jobs:
       - name: Update Source Code
         run: |
           cd $OPENWRT_ROOT_PATH
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git fetch upstream $SOURCE_BRANCH --tags
-          git merge upstream/$SOURCE_BRANCH
+          # Only attempt to update if the source is a branch, not a fixed tag.
+          if [[ $SOURCE_BRANCH != v* ]]; then
+            echo "Source is a branch. Checking for updates..."
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            # Add remote if it doesn't exist (e.g., when using a pre-built toolchain)
+            if ! git remote | grep -q 'upstream'; then
+              git remote add upstream $SOURCE_ORIGIN
+            fi
+            git fetch upstream $SOURCE_BRANCH --tags
+            git merge upstream/$SOURCE_BRANCH
+          else
+            echo "Source is a tag ($SOURCE_BRANCH). Skipping source update."
+          fi
 
       - name: Load Custom Feeds
         run: |
@@ -507,3 +522,4 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
