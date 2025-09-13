@@ -15,17 +15,15 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Source Branch"
+        description: "Source Repository URL"
         type: string
         required: true
         default: "https://github.com/openwrt/openwrt"
       branch:
-        description: "Source Branch"
-        type: choice
-        options:
-          - openwrt-22.03.7
-          - openwrt-23.05.6
-          - openwrt-24.10.2
+        description: "Source Branch or Tag (e.g., openwrt-23.05 or v23.05.6 for stable release)"
+        type: string
+        required: true
+        default: "openwrt-23.05"
       config_file:
         description: "Config Name"
         type: choice
@@ -151,7 +149,8 @@ jobs:
         id: clone
         run: |
           retry_count=0
-          until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+          # Using '--branch' is compatible with both branch names and tags.
+          until git clone --single-branch --branch $SOURCE_BRANCH $SOURCE_URL workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
             retry_count=$((retry_count+1))
             echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
             sleep $RETRY_DELAY
@@ -162,10 +161,13 @@ jobs:
             exit 1
           fi
           cd workspace/openwrt
+          # Optional: If cloning a tag, you'll be in a 'detached HEAD' state.
+          # The following command creates a local branch, which can be useful.
+          # git checkout -b temp-$SOURCE_BRANCH
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           git remote add upstream $SOURCE_ORIGIN
-          git fetch upstream $SOURCE_BRANCH
+          git fetch upstream $SOURCE_BRANCH --tags
           git merge upstream/$SOURCE_BRANCH
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
@@ -190,7 +192,7 @@ jobs:
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
+          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD || git rev-parse HEAD)
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
           cd $OPENWRT_ROOT_PATH
@@ -366,7 +368,7 @@ jobs:
           cd $OPENWRT_ROOT_PATH
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
-          git fetch upstream $SOURCE_BRANCH
+          git fetch upstream $SOURCE_BRANCH --tags
           git merge upstream/$SOURCE_BRANCH
 
       - name: Load Custom Feeds
