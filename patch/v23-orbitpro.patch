@@ -1,0 +1,291 @@
+diff --git a/package/boot/uboot-envtools/files/ramips b/package/boot/uboot-envtools/files/ramips
+index dac61be..14b6431 100644
+--- a/package/boot/uboot-envtools/files/ramips
++++ b/package/boot/uboot-envtools/files/ramips
+@@ -99,7 +99,8 @@ linksys,ea7300-v2|\
+ linksys,ea7500-v2|\
+ linksys,ea8100-v1|\
+ linksys,ea8100-v2|\
+-mts,wg430223)
++mts,wg430223|\
++orbitpro,hkm281)
+ 	ubootenv_add_uci_config "/dev/mtd1" "0x0" "0x1000" "0x20000"
+ 	;;
+ snr,snr-cpe-me1|\
+diff --git a/target/linux/ramips/dts/mt7621_orbitpro_hkm281.dts b/target/linux/ramips/dts/mt7621_orbitpro_hkm281.dts
+new file mode 100644
+index 0000000..6246229
+--- /dev/null
++++ b/target/linux/ramips/dts/mt7621_orbitpro_hkm281.dts
+@@ -0,0 +1,207 @@
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "mt7621.dtsi"
++
++#include <dt-bindings/gpio/gpio.h>
++#include <dt-bindings/input/input.h>
++#include <dt-bindings/leds/common.h>
++
++/ {
++	compatible = "orbitpro,hkm281", "mediatek,mt7621-soc";
++	model = "Orbit Pro HKM281";
++
++	aliases {
++		led-boot = &boot_red;
++		led-failsafe = &boot_red;
++		led-upgrade = &boot_red;
++	};
++
++	leds {
++		compatible = "gpio-leds";
++
++		boot_red: boot {
++			color = <LED_COLOR_ID_RED>;
++			function = LED_FUNCTION_BOOT;
++			gpios = <&gpio 16 GPIO_ACTIVE_HIGH>;
++		};
++
++		wan {
++			color = <LED_COLOR_ID_WHITE>;
++			function = LED_FUNCTION_WAN;
++			gpios = <&gpio 15 GPIO_ACTIVE_HIGH>;
++		};
++
++		lan {
++			color = <LED_COLOR_ID_WHITE>;
++			function = LED_FUNCTION_LAN;
++			gpios = <&gpio 0 GPIO_ACTIVE_HIGH>;
++		};
++	};
++
++	keys {
++		compatible = "gpio-keys";
++
++		wps {
++			label = "wps";
++			gpios = <&gpio 10 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_WPS_BUTTON>;
++		};
++
++		reset {
++			label = "reset";
++			gpios = <&gpio 7 GPIO_ACTIVE_LOW>;
++			linux,code = <KEY_RESTART>;
++		};
++	};
++
++	gpio-export {
++		compatible = "gpio-export";
++		#size-cells = <0>;
++
++		reset_cp {
++			gpio-export,name = "reset_cp";
++			gpio-export,output = <0>;
++			gpios = <&gpio 5 GPIO_ACTIVE_HIGH>;
++		};
++	};
++};
++
++&nand {
++	status = "okay";
++
++	partitions {
++		compatible = "fixed-partitions";
++		#address-cells = <1>;
++		#size-cells = <1>;
++
++		partition@0 {
++			label = "u-boot";
++			reg = <0x0 0x80000>;
++			read-only;
++		};
++
++		partition@80000 {
++			label = "u-boot-env";
++			reg = <0x80000 0x20000>;
++		};
++
++		factory: partition@100000 {
++			label = "factory";
++			reg = <0x100000 0x40000>;
++			read-only;
++
++			nvmem-layout {
++				compatible = "fixed-layout";
++				#address-cells = <1>;
++				#size-cells = <1>;
++
++				macaddr_factory_4: macaddr@4 {
++					reg = <0x4 0x6>;
++				};
++
++				macaddr_factory_8004: macaddr@8004 {
++					reg = <0x8004 0x6>;
++				};
++			};
++		};
++
++		partition@140000 {
++			label = "firmware";
++			reg = <0x140000 0x7dc0000>;
++
++			compatible = "fixed-partitions";
++			#address-cells = <1>;
++			#size-cells = <1>;
++
++			partition@0 {
++				label = "kernel";
++				reg = <0x0 0x400000>;
++			};
++
++			partition@400000 {
++				label = "ubi";
++				reg = <0x400000 0x79c0000>;
++			};
++		};
++
++		partition@7f00000 {
++			label = "stock-env";
++			reg = <0x7f00000 0x80000>;
++			read-only;
++		};
++	};
++};
++
++&pcie {
++	status = "okay";
++};
++
++&pcie0 {
++	wifi@0,0 {
++		compatible = "mediatek,mt76";
++		reg = <0x0000 0 0 0 0>;
++		mediatek,mtd-eeprom = <&factory 0x0000>;
++		ieee80211-freq-limit = <2400000 2500000>;
++
++		nvmem-cells = <&macaddr_factory_4>;
++		nvmem-cell-names = "mac-address";
++	};
++};
++
++&pcie1 {
++	wifi@0,0 {
++		compatible = "mediatek,mt76";
++		reg = <0x0000 0 0 0 0>;
++		mediatek,mtd-eeprom = <&factory 0x8000>;
++		ieee80211-freq-limit = <5000000 6000000>;
++
++		nvmem-cells = <&macaddr_factory_8004>;
++		nvmem-cell-names = "mac-address";
++	};
++};
++
++&gmac0 {
++	nvmem-cells = <&macaddr_factory_4>;
++	nvmem-cell-names = "mac-address";
++};
++
++&gmac1 {
++	status = "okay";
++	label = "wan";
++	phy-handle = <&ethphy0>;
++
++	nvmem-cells = <&macaddr_factory_8004>;
++	nvmem-cell-names = "mac-address";
++};
++
++&mdio {
++	ethphy0: ethernet-phy@0 {
++		reg = <0>;
++	};
++};
++
++&switch0 {
++	ports {
++		port@1 {
++			status = "okay";
++			label = "lan1";
++		};
++
++		port@2 {
++			status = "okay";
++			label = "lan2";
++		};
++
++		port@4 {
++			status = "okay";
++			label = "lan3";
++		};
++	};
++};
++
++&state_default {
++	gpio {
++		groups = "jtag", "uart3";
++		function = "gpio";
++	};
++};
+diff --git a/target/linux/ramips/image/mt7621.mk b/target/linux/ramips/image/mt7621.mk
+index 0b1d1b6..e10e5de 100644
+--- a/target/linux/ramips/image/mt7621.mk
++++ b/target/linux/ramips/image/mt7621.mk
+@@ -1992,6 +1992,20 @@ define Device/netis_wf2881
+ endef
+ TARGET_DEVICES += netis_wf2881
+ 
++define Device/orbitpro_hkm281
++  $(Device/nand)
++  $(Device/uimage-lzma-loader)
++  IMAGE_SIZE := 129280k
++  IMAGES += factory.bin
++  IMAGE/factory.bin := append-kernel | pad-to $$$$(KERNEL_SIZE) | append-ubi | \
++	check-size
++  DEVICE_VENDOR := Orbit Pro
++  DEVICE_MODEL := HKM281
++  DEVICE_PACKAGES := kmod-mt7603 kmod-mt7615e kmod-mt7663-firmware-ap \
++	kmod-usb3 kmod-usb-net-rndis comgt-ncm -uboot-envtools
++endef
++TARGET_DEVICES += orbitpro_hkm281
++
+ define Device/oraybox_x3a
+   $(Device/dsa-migration)
+   $(Device/uimage-lzma-loader)
+diff --git a/target/linux/ramips/mt7621/base-files/etc/board.d/01_leds b/target/linux/ramips/mt7621/base-files/etc/board.d/01_leds
+index a903969..148c025 100644
+--- a/target/linux/ramips/mt7621/base-files/etc/board.d/01_leds
++++ b/target/linux/ramips/mt7621/base-files/etc/board.d/01_leds
+@@ -186,6 +186,10 @@ netgear,wax202)
+ netis,n6)
+ 	ucidef_set_led_netdev "wan" "wan" "green:wan" "wan" "link tx rx"
+ 	;;
++orbitpro,hkm281)
++	ucidef_set_led_netdev "lan" "lan" "white:lan" "br-lan" "link"
++	ucidef_set_led_netdev "wan" "wan" "white:wan" "eth1" "link"
++	;;
+ oraybox,x3a)
+ 	ucidef_set_led_netdev "wan" "wan link" "red:status" "wan"
+ 	ucidef_set_led_netdev "lan" "lan link" "green:status" "br-lan"
+diff --git a/target/linux/ramips/mt7621/base-files/etc/board.d/02_network b/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+index 71e6f93..b7b77b1 100644
+--- a/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
++++ b/target/linux/ramips/mt7621/base-files/etc/board.d/02_network
+@@ -19,6 +19,7 @@ ramips_setup_interfaces()
+ 	hiwifi,hc5962|\
+ 	mercusys,mr70x-v1|\
+ 	netgear,wax202|\
++	orbitpro,hkm281|\
+ 	sim,simax1800t|\
+ 	xiaomi,mi-router-3-pro|\
+ 	xiaomi,mi-router-ac2100|\
+diff --git a/target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh b/target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh
+index 60dba1b..f20c1d3 100755
+--- a/target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh
++++ b/target/linux/ramips/mt7621/base-files/lib/upgrade/platform.sh
+@@ -104,6 +104,7 @@ platform_do_upgrade() {
+ 	netgear,wax202|\
+ 	netis,n6|\
+ 	netis,wf2881|\
++	orbitpro,hkm281|\
+ 	raisecom,msg1500-x-00|\
+ 	rostelecom,rt-fe-1a|\
+ 	rostelecom,rt-sf-1|\
