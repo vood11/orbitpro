@@ -413,6 +413,35 @@ jobs:
             echo "Skipping source update for tag-based build."
           fi
 
+      - name: Apply Custom Patch
+        run: |
+          # Extract major version prefix, e.g., v23 from 'openwrt-23.05' or 'v23.05.6'
+          VERSION_PREFIX=$(echo "$SOURCE_BRANCH" | grep -oE '(v|openwrt-)[0-9]+' | sed 's/openwrt-/v/')
+          
+          if [ -z "$VERSION_PREFIX" ]; then
+            echo "Could not determine version prefix from '$SOURCE_BRANCH'. Skipping patch."
+          else
+            PATCH_NAME="${VERSION_PREFIX}-orbitpro.patch"
+            PATCH_PATH="./patch/${PATCH_NAME}"
+            echo "Looking for patch file: $PATCH_PATH"
+            
+            if [ -f "$PATCH_PATH" ]; then
+              echo "Found patch file: $PATCH_NAME"
+              cp "$PATCH_PATH" "$OPENWRT_ROOT_PATH/"
+              cd "$OPENWRT_ROOT_PATH"
+              
+              # Check if the patch can be applied cleanly
+              if git apply --check "$PATCH_NAME"; then
+                echo "Patch can be applied cleanly. Applying..."
+                git apply "$PATCH_NAME"
+              else
+                echo "Patch check failed. The patch may not be compatible with the source. Skipping application."
+              fi
+            else
+              echo "Patch file not found for this version. Skipping."
+            fi
+          fi
+
       - name: Load Custom Feeds
         run: |
           cp ./scripts/$FEEDS_SH $OPENWRT_ROOT_PATH/$FEEDS_SH
@@ -555,4 +584,3 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
-
