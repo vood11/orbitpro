@@ -361,7 +361,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           name: toolchain-image
-          commit: ${{ env.CURRENT_BRANCH }}
+          commit: ${{ github.sha }}
           tag: ${{ env.TOOLCHAIN_TAG }}
           artifacts: output/*
           replacesArtifacts: true
@@ -569,7 +569,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           name: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
-          commit: ${{ env.CURRENT_BRANCH }}
+          commit: ${{ github.sha }}
           tag: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
@@ -585,3 +585,4 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
