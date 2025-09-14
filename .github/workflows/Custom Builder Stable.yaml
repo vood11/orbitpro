@@ -148,6 +148,7 @@ jobs:
       - name: Prepare Source Code
         id: clone
         run: |
+          mkdir -p workspace
           if [[ $SOURCE_BRANCH == v* ]]; then
             echo "Downloading source for tag $SOURCE_BRANCH via ZIP archive..."
             URL="${SOURCE_URL}/archive/refs/tags/${SOURCE_BRANCH}.zip"
