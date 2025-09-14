@@ -20,7 +20,7 @@ on:
         required: true
         default: "https://github.com/openwrt/openwrt"
       branch:
-        description: "Source Branch or Tag (e.g., openwrt-23.05 or v23.05.6 for stable release)"
+        description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
         default: "openwrt-23.05"
@@ -145,35 +145,67 @@ jobs:
           sudo -E apt-get -qq clean
           df -hT
 
-      - name: Clone Source Code
+      - name: Prepare Source Code
         id: clone
         run: |
-          retry_count=0
-          # Using '--branch' is compatible with both branch names and tags.
-          until git clone --single-branch --branch $SOURCE_BRANCH $SOURCE_URL workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
-            retry_count=$((retry_count+1))
-            echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
-            sleep $RETRY_DELAY
-            rm -rf workspace/openwrt
-          done
-          if [ ! -d "workspace/openwrt" ]; then
-            echo "Failed to clone repository after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          cd workspace/openwrt
-          # If SOURCE_BRANCH is a tag (e.g., v23.05.6), just create a local branch.
-          # Otherwise, if it's a development branch, fetch and merge updates.
           if [[ $SOURCE_BRANCH == v* ]]; then
-            echo "Cloned from tag $SOURCE_BRANCH. Creating local branch to avoid detached HEAD."
-            git checkout -b temp-$SOURCE_BRANCH
+            echo "Downloading source for tag $SOURCE_BRANCH via ZIP archive..."
+            URL="${SOURCE_URL}/archive/refs/tags/${SOURCE_BRANCH}.zip"
+            
+            retry_count=0
+            until curl -L -o workspace/openwrt.zip "$URL" || [ $retry_count -ge $MAX_RETRIES ]; do
+              retry_count=$((retry_count+1))
+              echo "Download failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+              sleep $RETRY_DELAY
+            done
+
+            if [ ! -f "workspace/openwrt.zip" ]; then
+                echo "Failed to download source archive after $MAX_RETRIES attempts"
+                exit 1
+            fi
+
+            unzip -q workspace/openwrt.zip -d workspace/
+            rm workspace/openwrt.zip
+            
+            EXTRACTED_DIR=$(find workspace/ -maxdepth 1 -type d -name "openwrt-*")
+            if [ -z "$EXTRACTED_DIR" ]; then
+              echo "Could not find extracted directory."
+              exit 1
+            fi
+            mv "$EXTRACTED_DIR" workspace/openwrt
+            cd workspace/openwrt
+            
+            # Initialize a git repository for compatibility with later steps
+            echo "Initializing a new git repository..."
+            git init
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git add .
+            git commit -m "Initial commit from tag ${SOURCE_BRANCH}"
+            git branch -M ${SOURCE_BRANCH} # Create a branch with the tag name
+            
           else
-            echo "Cloned from branch $SOURCE_BRANCH. Merging from upstream."
+            echo "Cloning source from branch $SOURCE_BRANCH..."
+            retry_count=0
+            until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+              retry_count=$((retry_count+1))
+              echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+              sleep $RETRY_DELAY
+              rm -rf workspace/openwrt
+            done
+            cd workspace/openwrt
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
             git remote add upstream $SOURCE_ORIGIN
-            git fetch upstream $SOURCE_BRANCH --tags
+            git fetch upstream $SOURCE_BRANCH
             git merge upstream/$SOURCE_BRANCH
           fi
+
+          if [ ! -d "$PWD" ]; then
+              echo "Failed to prepare source code directory"
+              exit 1
+          fi
+
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
@@ -197,10 +229,10 @@ jobs:
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD || git rev-parse HEAD)
+          cd $OPENWRT_ROOT_PATH
+          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-          cd $OPENWRT_ROOT_PATH
           export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
@@ -370,20 +402,15 @@ jobs:
 
       - name: Update Source Code
         run: |
-          cd $OPENWRT_ROOT_PATH
-          # Only attempt to update if the source is a branch, not a fixed tag.
+          # This step is skipped for tags, as they are fixed releases.
           if [[ $SOURCE_BRANCH != v* ]]; then
-            echo "Source is a branch. Checking for updates..."
+            cd $OPENWRT_ROOT_PATH
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
-            # Add remote if it doesn't exist (e.g., when using a pre-built toolchain)
-            if ! git remote | grep -q 'upstream'; then
-              git remote add upstream $SOURCE_ORIGIN
-            fi
-            git fetch upstream $SOURCE_BRANCH --tags
+            git fetch upstream $SOURCE_BRANCH
             git merge upstream/$SOURCE_BRANCH
           else
-            echo "Source is a tag ($SOURCE_BRANCH). Skipping source update."
+            echo "Skipping source update for tag-based build."
           fi
 
       - name: Load Custom Feeds
@@ -405,15 +432,21 @@ jobs:
       - name: Replace Vermagic
         if: ${{ env.VERMAGIC == 'true' }}
         run: |
-          snapshot_version="${SOURCE_BRANCH#openwrt-}"
-          release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
-            | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
-            | cut -d'"' -f4 | sed 's/^v//')
-          if [[ "$VERMAGIC_OPT" == "true" ]]; then
+          if [[ $SOURCE_BRANCH == v* ]]; then
+            release_version="${SOURCE_BRANCH#v}"
+          else
+            snapshot_version="${SOURCE_BRANCH#openwrt-}"
+            release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
+              | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
+              | cut -d'"' -f4 | sed 's/^v//')
+          fi
+
+          if [[ "$VERMAGIC_OPT" == "true" && $SOURCE_BRANCH != v* ]]; then
             version="${snapshot_version}-SNAPSHOT"
           else
             version="${release_version}"
           fi
+          
           kmods=$(curl -s https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/ \
             | grep -oP '<td class="n"><a href="\K[^/]+|<td class="d">\K[^<]+' \
             | paste -d '|' - - | sort -t '|' -k2 | head -n1 | cut -d '|' -f1)
