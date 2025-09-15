@@ -63,10 +63,6 @@ on:
         description: "SNAPSHOT Vermagic (uncheck for stable)"
         type: boolean
         default: false
-      maximize_space:
-        description: "Enable Maximize Build Space feature"
-        type: boolean
-        default: true
 
 env:
   SOURCE_URL: ${{ github.event.inputs.source }}
@@ -114,7 +110,6 @@ jobs:
           sudo sysctl vm.swappiness=10
 
       - name: Maximize Build Space
-        if: github.event.inputs.maximize_space == 'true'
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: '4096'
