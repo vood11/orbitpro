@@ -23,7 +23,7 @@ on:
         description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
-        default: "openwrt-23.05"
+        default: "v24.10.2"
       config_file:
         description: "Config Name"
         type: choice
@@ -122,7 +122,7 @@ jobs:
           remove-docker-images: 'true'
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Packages
         env:
