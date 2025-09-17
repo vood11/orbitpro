@@ -15,17 +15,15 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: "Source Branch"
+        description: "Source Repository URL"
         type: string
         required: true
         default: "https://github.com/openwrt/openwrt"
       branch:
-        description: "Source Branch"
-        type: choice
-        options:
-          - openwrt-22.03
-          - openwrt-23.05
-          - openwrt-24.10
+        description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
+        type: string
+        required: true
+        default: "v24.10.2"
       config_file:
         description: "Config Name"
         type: choice
@@ -53,6 +51,10 @@ on:
         description: "Firmware Release"
         type: boolean
         default: true
+      disable_compile_toolchain:
+        description: "Force skip toolchain compile and use existing cache by name"
+        type: boolean
+        default: false
       toolchain_rebuild:
         description: "Rebuild Toolchain"
         type: boolean
@@ -124,7 +126,7 @@ jobs:
           remove-docker-images: 'true'
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Packages
         env:
@@ -147,28 +149,96 @@ jobs:
           sudo -E apt-get -qq clean
           df -hT
 
-      - name: Clone Source Code
+      - name: Prepare Source Code
         id: clone
         run: |
-          retry_count=0
-          until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
-            retry_count=$((retry_count+1))
-            echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
-            sleep $RETRY_DELAY
-            rm -rf workspace/openwrt
-          done
-          if [ ! -d "workspace/openwrt" ]; then
-            echo "Failed to clone repository after $MAX_RETRIES attempts"
-            exit 1
+          mkdir -p workspace
+          if [[ $SOURCE_BRANCH == v* ]]; then
+            echo "Downloading source for tag $SOURCE_BRANCH via ZIP archive..."
+            URL="${SOURCE_URL}/archive/refs/tags/${SOURCE_BRANCH}.zip"
+            
+            retry_count=0
+            until curl -L -o workspace/openwrt.zip "$URL" || [ $retry_count -ge $MAX_RETRIES ]; do
+              retry_count=$((retry_count+1))
+              echo "Download failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+              sleep $RETRY_DELAY
+            done
+
+            if [ ! -f "workspace/openwrt.zip" ]; then
+                echo "Failed to download source archive after $MAX_RETRIES attempts"
+                exit 1
+            fi
+
+            unzip -q workspace/openwrt.zip -d workspace/
+            rm workspace/openwrt.zip
+            
+            EXTRACTED_DIR=$(find workspace/ -maxdepth 1 -type d -name "openwrt-*")
+            if [ -z "$EXTRACTED_DIR" ]; then
+              echo "Could not find extracted directory."
+              exit 1
+            fi
+            mv "$EXTRACTED_DIR" workspace/openwrt
+            cd workspace/openwrt
+            
+            echo "Initializing a new git repository..."
+            git init
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git add .
+            git commit -m "Initial commit from tag ${SOURCE_BRANCH}"
+            git branch -M ${SOURCE_BRANCH}
+            
+          else
+            echo "Cloning source from branch $SOURCE_BRANCH..."
+            retry_count=0
+            until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+              retry_count=$((retry_count+1))
+              echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+              sleep $RETRY_DELAY
+              rm -rf workspace/openwrt
+            done
+            cd workspace/openwrt
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git remote add upstream $SOURCE_ORIGIN
+            git fetch upstream $SOURCE_BRANCH
+            git merge upstream/$SOURCE_BRANCH
           fi
-          cd workspace/openwrt
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git remote add upstream $SOURCE_ORIGIN
-          git fetch upstream $SOURCE_BRANCH
-          git merge upstream/$SOURCE_BRANCH
+
+          if [ ! -d "$PWD" ]; then
+              echo "Failed to prepare source code directory"
+              exit 1
+          fi
+
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
+
+      - name: Apply Custom Patch
+        run: |
+          VERSION_PREFIX=$(echo "$SOURCE_BRANCH" | grep -oE '(v|openwrt-)[0-9]+' | sed 's/openwrt-/v/')
+          
+          if [ -z "$VERSION_PREFIX" ]; then
+            echo "Could not determine version prefix from '$SOURCE_BRANCH'. Skipping patch."
+          else
+            PATCH_NAME="${VERSION_PREFIX}-orbitpro.patch"
+            PATCH_PATH="./patch/${PATCH_NAME}"
+            echo "Looking for patch file: $PATCH_PATH"
+            
+            if [ -f "$PATCH_PATH" ]; then
+              echo "Found patch file: $PATCH_NAME"
+              cp "$PATCH_PATH" "$OPENWRT_ROOT_PATH/"
+              cd "$OPENWRT_ROOT_PATH"
+              
+              if git apply --check "$PATCH_NAME"; then
+                echo "Patch can be applied cleanly. Applying..."
+                git apply "$PATCH_NAME"
+              else
+                echo "Patch check failed. The patch may not be compatible with the source. Skipping application."
+              fi
+            else
+              echo "Patch file not found for this version. Skipping."
+            fi
+          fi
 
       - name: Generate Toolchain Configuration
         run: |
@@ -190,10 +260,10 @@ jobs:
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
+          cd $OPENWRT_ROOT_PATH
           export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-          cd $OPENWRT_ROOT_PATH
           export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
@@ -233,7 +303,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ GITHUB.REPOSITORY }}
+          repository: ${{ github.repository }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
           tag: ${{ env.TOOLCHAIN_TAG }}
 
@@ -241,18 +311,28 @@ jobs:
         run: |
           if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
             export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-            echo "Toolchain hash is $RELEASE_HASH"
+            echo "Found existing toolchain hash: $RELEASE_HASH"
           else
-            echo "Toolchain hash not found"
+            echo "Existing toolchain hash not found."
           fi
+          
           cd $OPENWRT_ROOT_PATH
           export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
-          echo "Current hash is $CURRENT_HASH"
-          if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+          echo "Current toolchain source hash: $CURRENT_HASH"
+
+          if [[ "${{ github.event.inputs.disable_compile_toolchain }}" == "true" ]]; then
+            echo "Toolchain compilation is disabled by user. Assuming existing toolchain is valid and skipping rebuild."
+          elif [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
             echo "REBUILD_CHECK=true" >> $GITHUB_ENV
             echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
+            echo "Toolchain requires rebuild. Reason:"
+            [ -z "$RELEASE_HASH" ] && echo "- No existing toolchain hash found."
+            [ "$CURRENT_HASH" != "$RELEASE_HASH" ] && echo "- Toolchain source has changed."
+            [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ] && echo "- Rebuild was manually triggered."
+          else
+            echo "Toolchain hash matches. Skipping rebuild."
           fi
 
       - name: Install Feeds
@@ -299,7 +379,10 @@ jobs:
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
-          mv $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img
+          
+          echo "Uploading toolchain as a single file."
+          mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
+
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
@@ -310,7 +393,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
+          assets: ${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -320,7 +403,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           name: toolchain-image
-          commit: ${{ env.CURRENT_BRANCH }}
+          commit: ${{ github.sha }}
           tag: ${{ env.TOOLCHAIN_TAG }}
           artifacts: output/*
           replacesArtifacts: true
@@ -341,7 +424,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ GITHUB.REPOSITORY }}
+          repository: ${{ github.repository }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
@@ -350,17 +433,27 @@ jobs:
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
           cd workspace
+          if [ ! -f "$TOOLCHAIN_IMAGE.img" ]; then
+            echo "Error: Toolchain image file '$TOOLCHAIN_IMAGE.img' not found after download."
+            exit 1
+          fi
+
+          echo "Toolchain image found. Preparing for mount."
           mkdir -p openwrt-ro openwrt workdir overlay
-          sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
+          sudo mount -o loop "$TOOLCHAIN_IMAGE.img" openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
 
       - name: Update Source Code
         run: |
-          cd $OPENWRT_ROOT_PATH
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git fetch upstream $SOURCE_BRANCH
-          git merge upstream/$SOURCE_BRANCH
+          if [[ $SOURCE_BRANCH != v* ]]; then
+            cd $OPENWRT_ROOT_PATH
+            git config --global user.name "github-actions"
+            git config --global user.email "github-actions@github.com"
+            git fetch upstream $SOURCE_BRANCH
+            git merge upstream/$SOURCE_BRANCH
+          else
+            echo "Skipping source update for tag-based build."
+          fi
 
       - name: Load Custom Feeds
         run: |
@@ -381,15 +474,21 @@ jobs:
       - name: Replace Vermagic
         if: ${{ env.VERMAGIC == 'true' }}
         run: |
-          snapshot_version="${SOURCE_BRANCH#openwrt-}"
-          release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
-            | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
-            | cut -d'"' -f4 | sed 's/^v//')
-          if [[ "$VERMAGIC_OPT" == "true" ]]; then
+          if [[ $SOURCE_BRANCH == v* ]]; then
+            release_version="${SOURCE_BRANCH#v}"
+          else
+            snapshot_version="${SOURCE_BRANCH#openwrt-}"
+            release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
+              | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
+              | cut -d'"' -f4 | sed 's/^v//')
+          fi
+
+          if [[ "$VERMAGIC_OPT" == "true" && $SOURCE_BRANCH != v* ]]; then
             version="${snapshot_version}-SNAPSHOT"
           else
             version="${release_version}"
           fi
+          
           kmods=$(curl -s https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/ \
             | grep -oP '<td class="n"><a href="\K[^/]+|<td class="d">\K[^<]+' \
             | paste -d '|' - - | sort -t '|' -k2 | head -n1 | cut -d '|' -f1)
@@ -482,7 +581,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           name: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
-          commit: ${{ env.CURRENT_BRANCH }}
+          commit: ${{ github.sha }}
           tag: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
