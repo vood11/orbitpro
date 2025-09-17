@@ -1,617 +1,510 @@
-# Custom OpenWrt Builder - Enhanced Version
-# Copyright (c) 2025 Enhanced by AI Assistant
-# This is free software, licensed under the MIT License.
+steps:
+  - name: Initialize Environment
+    run: |
+      echo "🚀 Initializing build environment..."
+      sudo timedatectl set-timezone "$TZ"
+      mkdir -p workspace
+      df -hT
+      ulimit -n 8192
+      sudo sysctl vm.swappiness=10
+      echo "Environment initialized successfully"
 
-name: Custom OpenWrt Builder Enhanced
+  - name: Maximize Build Space
+    uses: easimon/maximize-build-space@master
+    with:
+      root-reserve-mb: '4096'
+      temp-reserve-mb: '2048'
+      swap-size-mb: '2048'
+      remove-dotnet: 'true'
+      remove-android: 'true'
+      remove-haskell: 'true'
+      remove-codeql: 'true'
+      remove-docker-images: 'true'
 
-permissions:
-  contents: write
-  packages: write
+  - name: Checkout Repository
+    uses: actions/checkout@v4
 
-on:
-  repository_dispatch:
-  workflow_dispatch:
-    inputs:
-      source:
-        description: "Source Repository"
-        type: string
-        required: true
-        default: "https://github.com/openwrt/openwrt"
-      branch:
-        description: "Source Branch"
-        type: choice
-        required: true
-        options:
-          - openwrt-22.03
-          - openwrt-23.05
-          - openwrt-24.10
-        default: "openwrt-24.10"
-      config_file:
-        description: "Configuration File"
-        type: choice
-        required: true
-        options:
-          - openwrt.config
-          - openwrt.config-openclash
-          - openwrt.config-passwall
-          - openwrt.config-custom
-        default: "openwrt.config"
-      config_link:
-        description: "Use External Config URL"
-        type: boolean
-        required: false
-        default: false
-      config_url:
-        description: "External Config URL"
-        type: string
-        required: false
-        default: ""
-      diy_script:
-        description: "DIY Script"
-        type: choice
-        required: true
-        options:
-          - diy_v1.sh
-          - diy_v2.sh
-        default: "diy_v1.sh"
-      firmware_release:
-        description: "Create Firmware Release"
-        type: boolean
-        required: false
-        default: true
-      disable_toolchain_compile:
-        description: "Disable Toolchain Compilation"
-        type: boolean
-        required: false
-        default: false
-      vermagic_replace:
-        description: "Replace Vermagic"
-        type: boolean
-        required: false
-        default: true
-      snapshot_vermagic:
-        description: "Use SNAPSHOT Vermagic"
-        type: boolean
-        required: false
-        default: false
+  - name: Install Dependencies
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    run: |
+      echo "📦 Installing build dependencies..."
+      sudo -E apt-get -qq update
+      sudo -E apt-get -qq install -y \
+        ack antlr3 aria2 autoconf automake autopoint binutils bison \
+        btrfs-progs build-essential bzip2 ca-certificates ccache cmake coreutils \
+        cpio curl device-tree-compiler fastjar flex g++-multilib gawk gcc-multilib \
+        gettext git git-core gperf gzip haveged intltool jq libc6-dev-i386 \
+        libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
+        libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
+        libssl-dev libtool libz-dev lrzsz mkisofs msmtp nano ninja-build p7zip \
+        p7zip-full patch pigz pkgconf python3 python3-pip python3-pyelftools \
+        python3-setuptools qemu-utils rsync scons squashfs-tools swig tar \
+        uglifyjs unzip upx upx-ucl vim wget xxd xz-utils yasm zip \
+        zlib1g-dev zstd
+      sudo -E apt-get -qq autoremove --purge
+      sudo -E apt-get -qq clean
+      df -hT
+      echo "Dependencies installed successfully"
 
-env:
-  SOURCE_URL: ${{ github.event.inputs.source }}
-  SOURCE_ORIGIN: https://github.com/openwrt/openwrt
-  SOURCE_BRANCH: ${{ github.event.inputs.branch }}
-  FEEDS_SCRIPT: feeds.sh
-  FEEDS_PKG_SCRIPT: feeds_pkg.sh
-  CONFIG_FILE: ${{ github.event.inputs.config_file }}
-  CONFIG_LINK: ${{ github.event.inputs.config_link }}
-  CONFIG_URL: ${{ github.event.inputs.config_url }}
-  DIY_SCRIPT: ${{ github.event.inputs.diy_script }}
-  FIRMWARE_RELEASE: ${{ github.event.inputs.firmware_release }}
-  DISABLE_TOOLCHAIN: ${{ github.event.inputs.disable_toolchain_compile }}
-  TOOLCHAIN_TAG: toolchain
-  VERMAGIC_REPLACE: ${{ github.event.inputs.vermagic_replace }}
-  SNAPSHOT_VERMAGIC: ${{ github.event.inputs.snapshot_vermagic }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  TZ: UTC
-  MAX_RETRIES: 3
-  RETRY_DELAY: 30
+  - name: Download Source Code
+    id: clone
+    run: |
+      echo "📥 Downloading OpenWrt source code..."
+      cd workspace
+      
+      # Check if branch starts with 'v' (version tag)
+      if [[ "$SOURCE_BRANCH" =~ ^v[0-9] ]]; then
+        echo "Downloading version tag $SOURCE_BRANCH as ZIP archive"
+        retry_count=0
+        until curl -fsSL "${SOURCE_URL}/archive/refs/tags/${SOURCE_BRANCH}.zip" -o openwrt.zip || [ $retry_count -ge $MAX_RETRIES ]; do
+          retry_count=$((retry_count+1))
+          echo "Download failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+          sleep $RETRY_DELAY
+        done
+        
+        if [ ! -f "openwrt.zip" ]; then
+          echo "Failed to download archive after $MAX_RETRIES attempts"
+          exit 1
+        fi
+        
+        unzip -q openwrt.zip
+        mv openwrt-* openwrt
+        rm openwrt.zip
+      else
+        echo "Cloning branch $SOURCE_BRANCH"
+        retry_count=0
+        until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+          retry_count=$((retry_count+1))
+          echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
+          sleep $RETRY_DELAY
+          rm -rf openwrt
+        done
+        
+        if [ ! -d "openwrt" ]; then
+          echo "Failed to clone repository after $MAX_RETRIES attempts"
+          exit 1
+        fi
+      fi
+      
+      cd openwrt
+      git config --global user.name "github-actions"
+      git config --global user.email "github-actions@github.com"
+      
+      OPENWRT_ROOT_PATH="$PWD"
+      echo "OPENWRT_ROOT_PATH=$OPENWRT_ROOT_PATH" >> $GITHUB_ENV
+      echo "OPENWRT_ROOT_PATH=$OPENWRT_ROOT_PATH" >> $GITHUB_OUTPUT
+      echo "Source code downloaded to: $OPENWRT_ROOT_PATH"
 
-jobs:
-  Build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    
-    outputs:
-      OPENWRT_ROOT_PATH: ${{ steps.clone.outputs.OPENWRT_ROOT_PATH }}
-      SOURCE_OWNER: ${{ steps.variables.outputs.SOURCE_OWNER }}
-      SOURCE_REPO: ${{ steps.variables.outputs.SOURCE_REPO }}
-      CURRENT_BRANCH: ${{ steps.variables.outputs.CURRENT_BRANCH }}
-      DEVICE_NAME: ${{ steps.variables.outputs.DEVICE_NAME }}
-      DEVICE_PLATFORM: ${{ steps.variables.outputs.DEVICE_PLATFORM }}
-      DEVICE_TARGET: ${{ steps.variables.outputs.DEVICE_TARGET }}
-      DEVICE_SUBTARGET: ${{ steps.variables.outputs.DEVICE_SUBTARGET }}
-      TOOLCHAIN_IMAGE: ${{ steps.variables.outputs.TOOLCHAIN_IMAGE }}
-      BUILD_DATE: ${{ steps.variables.outputs.BUILD_DATE }}
+  - name: Apply Custom Patches
+    run: |
+      echo "🔧 Applying custom patches..."
+      cd $OPENWRT_ROOT_PATH
+      
+      # Extract version from SOURCE_BRANCH for patch matching
+      VERSION_PREFIX=$(echo "$SOURCE_BRANCH" | sed 's/\.[^.]*$//')
+      PATCH_FILE="../patch/${VERSION_PREFIX}.patch"
+      
+      if [ -f "$PATCH_FILE" ]; then
+        echo "Applying patch: $PATCH_FILE"
+        git apply "$PATCH_FILE" || echo "Patch application failed or not needed"
+      else
+        echo "No patch file found for version: $VERSION_PREFIX"
+      fi
 
-    steps:
-      - name: Initialize Environment
-        run: |
-          sudo timedatectl set-timezone "$TZ"
-          mkdir -p workspace
-          df -hT
-          ulimit -n 8192
-          sudo sysctl vm.swappiness=10
-          echo "Environment initialized successfully"
+  - name: Load Configuration & Extract Variables
+    id: env
+    run: |
+      echo "⚙️ Loading configuration and extracting variables..."
+      
+      # Load configuration file
+      if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
+        echo "Downloading configuration from URL: $CONFIG_URL"
+        curl -fsSL "$CONFIG_URL" -o "$OPENWRT_ROOT_PATH/.config"
+      else
+        echo "Using local configuration file: $CONFIG_FILE"
+        cp "./config/$CONFIG_FILE" "$OPENWRT_ROOT_PATH/.config"
+      fi
+      
+      cd $OPENWRT_ROOT_PATH
+      make defconfig
+      
+      # Extract variables from config
+      DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' | head -n1)
+      DEVICE_TARGET=$(grep 'CONFIG_TARGET_BOARD' .config | awk -F '"' '{print $2}')
+      DEVICE_SUBTARGET=$(grep 'CONFIG_TARGET_SUBTARGET' .config | awk -F '"' '{print $2}')
+      SOURCE_OWNER=$(echo $SOURCE_URL | awk -F '/' '{print $(NF-1)}')
+      SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
+      
+      # Generate toolchain image name
+      TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
+      BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
+      FIRMWARE_NAME="${SOURCE_BRANCH}_${DEVICE_NAME}"
+      
+      # Export variables
+      echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
+      echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
+      echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV  
+      echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_OUTPUT
+      echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
+      echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
+      echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
+      echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
+      echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
+      echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
+      echo "FIRMWARE_NAME=$FIRMWARE_NAME" >> $GITHUB_ENV
+      echo "FIRMWARE_NAME=$FIRMWARE_NAME" >> $GITHUB_OUTPUT
+      
+      echo "✅ Variables extracted:"
+      echo "  Device: $DEVICE_NAME"
+      echo "  Target: $DEVICE_TARGET/$DEVICE_SUBTARGET" 
+      echo "  Toolchain Image: $TOOLCHAIN_IMAGE"
+      echo "  Firmware Name: $FIRMWARE_NAME"
 
-      - name: Maximize Build Space
-        uses: easimon/maximize-build-space@master
-        with:
-          root-reserve-mb: '4096'
-          temp-reserve-mb: '2048'
-          swap-size-mb: '2048'
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
-          remove-codeql: 'true'
-          remove-docker-images: 'true'
+  - name: Get Existing Toolchain Hash
+    id: get_hash
+    continue-on-error: true
+    uses: robinraju/release-downloader@v1.12
+    with:
+      token: ${{ env.TOKEN }}
+      repository: ${{ github.repository }}
+      fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
+      tag: ${{ env.TOOLCHAIN_TAG }}
 
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+  - name: Compare Toolchain Hash
+    id: hash_check
+    run: |
+      echo "🔍 Checking toolchain rebuild requirements..."
+      
+      if [ "$DISABLE_COMPILE_TOOLCHAIN" == "true" ]; then
+        echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_ENV
+        echo "SKIP_TOOLCHAIN=true" >> $GITHUB_ENV
+        echo "✅ Toolchain compilation disabled by user input"
+        exit 0
+      fi
+      
+      cd $OPENWRT_ROOT_PATH
+      CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain 2>/dev/null || echo "")
+      echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
+      
+      if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
+        RELEASE_HASH=$(cat "$TOOLCHAIN_IMAGE.hash")
+        echo "📋 Found existing toolchain hash: $RELEASE_HASH"
+        echo "📋 Current toolchain hash: $CURRENT_HASH"
+      else
+        RELEASE_HASH=""
+        echo "📋 No existing toolchain hash found"
+      fi
+      
+      # Determine if rebuild is needed
+      if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "$TOOLCHAIN_REBUILD" == "true" ]; then
+        echo "REBUILD_TOOLCHAIN=true" >> $GITHUB_ENV
+        echo "SKIP_TOOLCHAIN=false" >> $GITHUB_ENV
+        echo "🔄 Toolchain rebuild required"
+      else
+        echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_ENV  
+        echo "SKIP_TOOLCHAIN=false" >> $GITHUB_ENV
+        echo "✅ Using existing toolchain"
+      fi
 
-      - name: Install Build Dependencies
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo -E apt-get -qq update
-          sudo -E apt-get -qq install -y \
-            ack antlr3 aria2 autoconf automake autopoint binutils bison \
-            btrfs-progs build-essential bzip2 ca-certificates ccache cmake coreutils \
-            cpio curl device-tree-compiler fastjar flex g++-multilib gawk gcc-multilib \
-            gettext git git-core gperf gzip haveged intltool jq libc6-dev-i386 \
-            libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev \
-            libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev \
-            libssl-dev libtool libz-dev lrzsz mkisofs msmtp nano ninja-build p7zip \
-            p7zip-full patch pigz pkgconf python3 python3-pip python3-pyelftools \
-            python3-setuptools qemu-utils rsync scons squashfs-tools swig tar \
-            uglifyjs unzip upx upx-ucl vim wget xxd xz-utils yasm zip \
-            zlib1g-dev zstd
-          sudo -E apt-get -qq autoremove --purge
-          sudo -E apt-get -qq clean
-          df -hT
-          echo "Build dependencies installed successfully"
+  - name: Install Feeds (for Toolchain)
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    run: |
+      echo "📦 Installing feeds for toolchain build..."
+      cd $OPENWRT_ROOT_PATH
+      ./scripts/feeds clean
+      ./scripts/feeds update -a
+      ./scripts/feeds install -a
 
-      - name: Clone Source Code
-        id: clone
-        run: |
-          retry_count=0
-          until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
-            retry_count=$((retry_count+1))
-            echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
-            sleep $RETRY_DELAY
-            rm -rf workspace/openwrt 2>/dev/null || true
-          done
-          
-          if [ ! -d "workspace/openwrt" ]; then
-            echo "Failed to clone repository after $MAX_RETRIES attempts"
-            exit 1
-          fi
-          
-          cd workspace/openwrt
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git remote add upstream $SOURCE_ORIGIN || true
-          git fetch upstream $SOURCE_BRANCH
-          git merge upstream/$SOURCE_BRANCH --no-edit
-          
-          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
-          echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
-          echo "Source code cloned successfully to: $PWD"
+  - name: Compile Tools
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    timeout-minutes: 60
+    run: |
+      echo "🔨 Compiling tools..."
+      cd $OPENWRT_ROOT_PATH
+      echo "Using $(nproc) threads for compilation"
+      make tools/compile -j$(($(nproc) + 1)) || make tools/compile -j1 V=s
+      echo "✅ Tools compilation completed"
 
-      - name: Generate Toolchain Configuration
-        run: |
-          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
-            echo "Downloading configuration from: $CONFIG_URL"
-            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
-          else
-            echo "Using local configuration file: $CONFIG_FILE"
-            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
-          fi
-          
-          cd $OPENWRT_ROOT_PATH
-          echo -e "\nCONFIG_ALL=y\nCONFIG_ALL_NONSHARED=y" >> .config
-          make defconfig
-          echo "Toolchain configuration generated successfully"
+  - name: Compile Toolchain
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    timeout-minutes: 120
+    run: |
+      echo "🔨 Compiling toolchain..."
+      cd $OPENWRT_ROOT_PATH
+      echo "Using $(nproc) threads for compilation"
+      make toolchain/compile -j$(($(nproc) + 1)) || make toolchain/compile -j1 V=s
+      echo "✅ Toolchain compilation completed"
 
-      - name: Generate Build Variables
-        id: variables
-        run: |
-          export SOURCE_OWNER=$(echo $SOURCE_URL | awk -F '/' '{print $(NF-1)}')
-          echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_ENV
-          echo "SOURCE_OWNER=$SOURCE_OWNER" >> $GITHUB_OUTPUT
-          
-          export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
-          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
-          echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          
-          cd $OPENWRT_ROOT_PATH
-          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
-          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
-          echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
-          
-          export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' | head -n1)
-          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
-          echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
-          
-          export DEVICE_PLATFORM=$(grep 'CONFIG_TARGET_ARCH_PACKAGES' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_ENV
-          echo "DEVICE_PLATFORM=$DEVICE_PLATFORM" >> $GITHUB_OUTPUT
-          
-          export DEVICE_TARGET=$(grep 'CONFIG_TARGET_BOARD' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
-          echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_OUTPUT
-          
-          export DEVICE_SUBTARGET=$(grep 'CONFIG_TARGET_SUBTARGET' .config | awk -F '"' '{print $2}')
-          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
-          echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
-          
-          export TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
-          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
-          echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
-          
-          export BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_ENV
-          echo "BUILD_DATE=$BUILD_DATE" >> $GITHUB_OUTPUT
-          
-          echo "Build variables generated successfully"
+  - name: Create & Upload Toolchain Cache
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    run: |
+      echo "📦 Creating toolchain cache..."
+      cd workspace
+      
+      # Clean unnecessary files before creating image
+      cd openwrt
+      rm -rf .config* dl bin
+      cd ..
+      
+      # Create single SquashFS image
+      echo "Creating SquashFS image: $TOOLCHAIN_IMAGE.img"
+      mksquashfs openwrt "$TOOLCHAIN_IMAGE.img" \
+        -force-gid 1001 -force-uid 1001 \
+        -comp zstd -Xcompression-level 19
+      
+      # Prepare output directory
+      mkdir -p "$GITHUB_WORKSPACE/output"
+      mv "$TOOLCHAIN_IMAGE.img" "$GITHUB_WORKSPACE/output/"
+      
+      # Create hash file
+      cd $OPENWRT_ROOT_PATH  
+      echo "$CURRENT_HASH" > "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash"
+      
+      ls -lh "$GITHUB_WORKSPACE/output"
+      echo "✅ Toolchain cache created successfully"
 
-      - name: Generate Release Suffix
-        id: suffix
-        run: |
-          case "${{ env.CONFIG_FILE }}" in
-            *openclash)
-              echo "suffix=_openclash" >> $GITHUB_ENV
-              ;;
-            *passwall)
-              echo "suffix=_passwall" >> $GITHUB_ENV
-              ;;
-            *)
-              echo "suffix=" >> $GITHUB_ENV
-              ;;
-          esac
+  - name: Delete Old Toolchain Assets
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    uses: mknejp/delete-release-assets@v1
+    with:
+      token: ${{ env.TOKEN }}
+      tag: ${{ env.TOOLCHAIN_TAG }}
+      assets: ${{ env.TOOLCHAIN_IMAGE }}.*
+      fail-if-no-assets: false
+      fail-if-no-release: false
 
-      - name: Check Toolchain Skip Condition
-        id: toolchain_check
-        run: |
-          if [[ "$DISABLE_TOOLCHAIN" == "true" ]]; then
-            echo "Toolchain compilation disabled by user input"
-            echo "SKIP_TOOLCHAIN_BUILD=true" >> $GITHUB_ENV
-            echo "SKIP_TOOLCHAIN_BUILD=true" >> $GITHUB_OUTPUT
-          else
-            echo "Toolchain compilation enabled"
-            echo "SKIP_TOOLCHAIN_BUILD=false" >> $GITHUB_ENV
-            echo "SKIP_TOOLCHAIN_BUILD=false" >> $GITHUB_OUTPUT
-          fi
+  - name: Upload Toolchain to Release
+    if: env.REBUILD_TOOLCHAIN == 'true'
+    uses: ncipollo/release-action@v1
+    with:
+      token: ${{ env.TOKEN }}
+      name: toolchain-cache
+      tag: ${{ env.TOOLCHAIN_TAG }}
+      artifacts: output/*
+      replacesArtifacts: true
+      allowUpdates: true
+      prerelease: true
 
-      - name: Get Existing Toolchain Hash
-        continue-on-error: true
-        uses: robinraju/release-downloader@v1.12
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
-          tag: ${{ env.TOOLCHAIN_TAG }}
+  - name: Download Toolchain Cache
+    if: env.REBUILD_TOOLCHAIN == 'false' && env.DISABLE_COMPILE_TOOLCHAIN == 'false'
+    uses: robinraju/release-downloader@v1.12
+    with:
+      token: ${{ env.TOKEN }}
+      repository: ${{ github.repository }}
+      fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
+      tag: ${{ env.TOOLCHAIN_TAG }}
+      out-file-path: workspace
 
-      - name: Compare Toolchain Hash
-        id: hash_compare
-        run: |
-          if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
-            export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-            echo "Existing toolchain hash: $RELEASE_HASH"
-          else
-            export RELEASE_HASH=""
-            echo "No existing toolchain hash found"
-          fi
-          
-          cd $OPENWRT_ROOT_PATH
-          export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
-          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
-          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
-          echo "Current hash: $CURRENT_HASH"
-          
-          if [[ "$SKIP_TOOLCHAIN_BUILD" == "true" ]]; then
-            echo "Toolchain build skipped by user request"
-            echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_ENV
-            echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_OUTPUT
-          elif [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ]; then
-            echo "Toolchain rebuild required"
-            echo "REBUILD_TOOLCHAIN=true" >> $GITHUB_ENV
-            echo "REBUILD_TOOLCHAIN=true" >> $GITHUB_OUTPUT
-          else
-            echo "Toolchain is up to date"
-            echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_ENV
-            echo "REBUILD_TOOLCHAIN=false" >> $GITHUB_OUTPUT
-          fi
+  - name: Prepare Toolchain from Cache  
+    if: env.REBUILD_TOOLCHAIN == 'false' && env.DISABLE_COMPILE_TOOLCHAIN == 'false'
+    run: |
+      echo "📂 Preparing toolchain from cache..."
+      cd workspace
+      
+      # Create mount directories
+      mkdir -p openwrt-ro openwrt workdir overlay
+      
+      # Mount the single toolchain image
+      sudo mount -o loop "$TOOLCHAIN_IMAGE.img" openwrt-ro
+      sudo mount -t overlay overlay \
+        -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir \
+        openwrt
+      
+      echo "✅ Toolchain cache mounted successfully"
 
-      - name: Install Feeds for Toolchain
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        run: |
-          echo "Installing feeds for toolchain build"
-          cd $OPENWRT_ROOT_PATH
-          ./scripts/feeds clean
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          echo "Feeds installed successfully"
+  - name: Update Feeds
+    run: |
+      echo "📦 Updating and installing feeds..."
+      cd $OPENWRT_ROOT_PATH
+      
+      # Load custom feeds if script exists
+      if [ -f "../scripts/feeds.sh" ]; then
+        cp "../scripts/feeds.sh" ./
+        chmod +x feeds.sh && ./feeds.sh
+      fi
+      
+      ./scripts/feeds clean
+      ./scripts/feeds update -a
+      
+      # Install custom packages if script exists  
+      if [ -f "../scripts/feeds_pkg.sh" ]; then
+        cp "../scripts/feeds_pkg.sh" ./
+        chmod +x feeds_pkg.sh && ./feeds_pkg.sh
+        ./scripts/feeds update -a
+      fi
+      
+      ./scripts/feeds install -a
+      echo "✅ Feeds updated successfully"
 
-      - name: Load Configuration for Toolchain
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        run: |
-          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
-            echo "Downloading configuration from: $CONFIG_URL"
-            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
-          else
-            echo "Using local configuration file: $CONFIG_FILE"
-            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
-          fi
-          
-          cd $OPENWRT_ROOT_PATH
-          make defconfig
-          echo "Configuration loaded successfully"
+  - name: Load Final Configuration
+    run: |
+      echo "⚙️ Loading final configuration..."
+      
+      if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
+        curl -fsSL "$CONFIG_URL" -o "$OPENWRT_ROOT_PATH/.config"
+      else
+        cp "./config/$CONFIG_FILE" "$OPENWRT_ROOT_PATH/.config"
+      fi
+      
+      cd $OPENWRT_ROOT_PATH
+      make defconfig
+      echo "✅ Final configuration loaded"
 
-      - name: Compile Tools
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        timeout-minutes: 90
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo "Compiling tools with $(nproc) threads"
-          make tools/compile -j$(($(nproc) + 1)) || make tools/compile -j1 V=s
-          echo "Tools compiled successfully"
+  - name: Apply DIY Script
+    run: |
+      echo "🔧 Applying DIY customizations..."
+      cd $OPENWRT_ROOT_PATH
+      
+      if [ -f "../scripts/$DIY_SH" ]; then
+        cp "../scripts/$DIY_SH" ./diy.sh
+        chmod +x diy.sh && ./diy.sh
+        echo "✅ DIY script applied: $DIY_SH"
+      else
+        echo "No DIY script found: $DIY_SH"
+      fi
 
-      - name: Compile Toolchain
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        timeout-minutes: 180
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo "Compiling toolchain with $(nproc) threads"
-          make toolchain/compile -j$(($(nproc) + 1)) || make toolchain/compile -j1 V=s
-          rm -rf .config dl bin
-          echo "Toolchain compiled successfully"
+  - name: Replace Vermagic
+    if: env.VERMAGIC == 'true'
+    run: |
+      echo "🔄 Replacing kernel vermagic..."
+      
+      snapshot_version="${SOURCE_BRANCH#*-}"
+      if [[ "$SOURCE_BRANCH" =~ ^v[0-9] ]]; then
+        snapshot_version="${SOURCE_BRANCH#v}"
+        snapshot_version="${snapshot_version%.*}"
+      fi
+      
+      if [[ "$VERMAGIC_OPT" == "true" ]]; then
+        version="${snapshot_version}-SNAPSHOT"
+      else
+        # Try to get the latest release version
+        release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
+          | grep -m1 -oE "\"name\":\\s*\"v${snapshot_version}\\.[^\"]+\"" \
+          | cut -d'"' -f4 | sed 's/^v//' || echo "${snapshot_version}.0")
+        version="${release_version}"
+      fi
+      
+      echo "Using vermagic version: $version"
+      
+      # Download and replace vermagic if possible
+      vermagic_url="https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/"
+      
+      if curl -s "$vermagic_url" > /dev/null 2>&1; then
+        vermagic=$(curl -s "$vermagic_url" | grep -oP '\d+\.\d+\.\d+-\d+-[a-z0-9]{16}' | head -n1)
+        if [ -n "$vermagic" ]; then
+          echo "Replacing vermagic with: $vermagic"
+          find staging_dir -name "vermagic" -exec sh -c 'echo "$1" > "$2"' _ "$vermagic" {} \; 2>/dev/null || true
+        fi
+      fi
 
-      - name: Generate Toolchain Image
-        id: toolchain_image
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        run: |
-          cd workspace
-          echo "Creating toolchain image: $TOOLCHAIN_IMAGE"
-          mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
-          
-          mkdir -p $GITHUB_WORKSPACE/output
-          # Keep as single file - no splitting
-          mv $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/
-          
-          cd $OPENWRT_ROOT_PATH
-          echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
-          
-          ls -lh $GITHUB_WORKSPACE/output
-          echo "Toolchain image generated successfully"
+  - name: Download Packages
+    run: |
+      echo "📥 Downloading packages..."
+      cd $OPENWRT_ROOT_PATH
+      make download -j8 || make download -j1 V=s
+      find dl -size -1024c -exec ls -l {} \;
+      find dl -size -1024c -exec rm -f {} \;
 
-      - name: Delete Old Toolchain Assets
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        uses: mknejp/delete-release-assets@v1
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: ${{ env.TOOLCHAIN_IMAGE }}*
-          fail-if-no-assets: false
-          fail-if-no-release: false
+  - name: Compile Packages  
+    timeout-minutes: 180
+    run: |
+      echo "🔨 Compiling packages..."
+      cd $OPENWRT_ROOT_PATH
+      echo "Using $(nproc) threads for compilation"
+      make package/compile -j$(($(nproc) + 1)) || make package/compile -j1 V=s
+      echo "✅ Packages compilation completed"
 
-      - name: Upload Toolchain Image
-        if: ${{ env.REBUILD_TOOLCHAIN == 'true' }}
-        uses: ncipollo/release-action@v1
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          name: toolchain-image
-          commit: ${{ env.CURRENT_BRANCH }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          artifacts: output/*
-          replacesArtifacts: true
-          allowUpdates: true
-          prerelease: true
+  - name: Compile Target
+    timeout-minutes: 60
+    run: |
+      echo "🔨 Compiling target..."
+      cd $OPENWRT_ROOT_PATH
+      make target/install -j$(($(nproc) + 1)) || make target/install -j1 V=s
+      make checksum
+      echo "✅ Target compilation completed"
 
-      - name: Cleanup Build Directory
-        run: |
-          cd workspace
-          if [[ "$REBUILD_TOOLCHAIN" == "true" ]]; then
-            rm -rf output
-          else
-            rm -rf openwrt 2>/dev/null || true
-          fi
-          echo "Build directory cleaned up"
+  - name: Check Space Usage
+    run: |
+      echo "💾 Checking space usage..."
+      df -hT
+      du -h --max-depth=1 workspace/ | sort -hr
 
-      - name: Download Existing Toolchain
-        if: ${{ env.REBUILD_TOOLCHAIN == 'false' }}
-        uses: robinraju/release-downloader@v1.12
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}
-          tag: ${{ env.TOOLCHAIN_TAG }}
-          out-file-path: workspace
+  - name: Upload Bin Directory
+    uses: actions/upload-artifact@v4
+    with:
+      name: openwrt-bin-${{ env.FIRMWARE_NAME }}
+      path: workspace/openwrt/bin/
+      retention-days: 7
 
-      - name: Prepare Existing Toolchain
-        if: ${{ env.REBUILD_TOOLCHAIN == 'false' }}
-        run: |
-          cd workspace
-          echo "Preparing existing toolchain"
-          mkdir -p openwrt-ro openwrt workdir overlay
-          sudo mount -o loop $TOOLCHAIN_IMAGE openwrt-ro
-          sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
-          echo "Existing toolchain prepared successfully"
+  - name: Organize Firmware Files
+    id: organize
+    run: |
+      echo "📁 Organizing firmware files..."
+      cd $OPENWRT_ROOT_PATH/bin/targets/*/*
+      
+      # Remove unnecessary files
+      rm -rf packages
+      
+      # Create release directory
+      mkdir -p release
+      
+      # Move firmware files
+      for ext in bin img gz; do
+        find . -name "*.$ext" -exec mv {} release/ \; 2>/dev/null || true
+      done
+      
+      # Move other important files
+      find . -name "*.manifest" -exec mv {} release/ \; 2>/dev/null || true
+      find . -name "sha256sums" -exec mv {} release/ \; 2>/dev/null || true
+      
+      ls -la release/
+      echo "RELEASE_PATH=$PWD/release" >> $GITHUB_ENV
+      echo "✅ Firmware files organized"
 
-      - name: Update Source Code
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git fetch upstream $SOURCE_BRANCH
-          git merge upstream/$SOURCE_BRANCH --no-edit
-          echo "Source code updated successfully"
+  - name: Upload Firmware to Release
+    if: env.FIRMWARE_RELEASE == 'true'
+    uses: ncipollo/release-action@v1
+    with:
+      token: ${{ env.TOKEN }}
+      name: OpenWrt Firmware ${{ env.FIRMWARE_NAME }}
+      tag: ${{ env.FIRMWARE_NAME }}
+      artifacts: ${{ env.RELEASE_PATH }}/*
+      replacesArtifacts: true
+      allowUpdates: true
+      body: |
+        ## OpenWrt Firmware Build
+        
+        **Build Information:**
+        - Source: ${{ env.SOURCE_URL }}
+        - Branch/Tag: ${{ env.SOURCE_BRANCH }}  
+        - Device: ${{ env.DEVICE_NAME }}
+        - Target: ${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}
+        - Configuration: ${{ env.CONFIG_FILE }}
+        - Build Date: ${{ env.BUILD_DATE }}
+        
+        **Features:**
+        - DIY Script: ${{ env.DIY_SH }}
+        - Vermagic Replaced: ${{ env.VERMAGIC }}
+        - Toolchain Rebuilt: ${{ env.REBUILD_TOOLCHAIN }}
+        
+        ---
+        *This firmware was built automatically using GitHub Actions*
 
-      - name: Load Custom Feeds
-        run: |
-          echo "Loading custom feeds"
-          cp ./scripts/$FEEDS_SCRIPT $OPENWRT_ROOT_PATH/$FEEDS_SCRIPT
-          cd $OPENWRT_ROOT_PATH
-          chmod +x ./$FEEDS_SCRIPT && ./$FEEDS_SCRIPT
-          echo "Custom feeds loaded successfully"
-
-      - name: Install All Feeds
-        run: |
-          echo "Installing all feeds"
-          cp ./scripts/$FEEDS_PKG_SCRIPT $OPENWRT_ROOT_PATH/$FEEDS_PKG_SCRIPT
-          cd $OPENWRT_ROOT_PATH
-          ./scripts/feeds clean
-          ./scripts/feeds update -a
-          chmod +x ./$FEEDS_PKG_SCRIPT && ./$FEEDS_PKG_SCRIPT
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
-          echo "All feeds installed successfully"
-
-      - name: Replace Vermagic
-        if: ${{ env.VERMAGIC_REPLACE == 'true' }}
-        run: |
-          echo "Replacing vermagic"
-          snapshot_version="${SOURCE_BRANCH#openwrt-}"
-          
-          release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
-            | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
-            | cut -d'"' -f4 | sed 's/^v//')
-          
-          if [[ "$SNAPSHOT_VERMAGIC" == "true" ]]; then
-            version="${snapshot_version}-SNAPSHOT"
-          else
-            version="${release_version}"
-          fi
-          
-          echo "Using version: $version"
-          
-          kmods_url="https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/"
-          vermagic=$(curl -s $kmods_url \
-            | grep -oP 'href="[^"]*-[a-f0-9]{32}/"' \
-            | head -n1 \
-            | grep -oP '[a-f0-9]{32}')
-          
-          if [ -n "$vermagic" ]; then
-            echo "Found vermagic: $vermagic"
-            find $OPENWRT_ROOT_PATH -name "vermagic" -type f -exec sh -c 'echo "$1" > "$0"' {} "$vermagic" \;
-          else
-            echo "Could not find vermagic, skipping replacement"
-          fi
-
-      - name: Load DIY Script
-        run: |
-          echo "Loading DIY script: $DIY_SCRIPT"
-          cp ./scripts/$DIY_SCRIPT $OPENWRT_ROOT_PATH/$DIY_SCRIPT
-          cd $OPENWRT_ROOT_PATH
-          chmod +x ./$DIY_SCRIPT && ./$DIY_SCRIPT
-          echo "DIY script executed successfully"
-
-      - name: Load Final Configuration
-        run: |
-          if [[ "$CONFIG_LINK" == "true" && -n "$CONFIG_URL" ]]; then
-            echo "Downloading final configuration from: $CONFIG_URL"
-            curl -fsSL $CONFIG_URL -o $OPENWRT_ROOT_PATH/.config
-          else
-            echo "Using local configuration file: $CONFIG_FILE"
-            cp ./config/$CONFIG_FILE $OPENWRT_ROOT_PATH/.config
-          fi
-          
-          cd $OPENWRT_ROOT_PATH
-          make defconfig
-          echo "Final configuration loaded successfully"
-
-      - name: Download Package Sources
-        timeout-minutes: 30
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo "Downloading package sources"
-          make download -j8 || make download -j1 V=s
-          find dl -size -1024c -exec ls -l {} \;
-          find dl -size -1024c -exec rm -f {} \;
-          echo "Package sources downloaded successfully"
-
-      - name: Compile Firmware
-        timeout-minutes: 300
-        run: |
-          cd $OPENWRT_ROOT_PATH
-          echo "Starting firmware compilation with $(nproc) threads"
-          echo "Compilation started at: $(date)"
-          make -j$(($(nproc) + 1)) || make -j1 V=s
-          echo "Compilation finished at: $(date)"
-          
-          echo "Disk usage after build:"
-          df -hT
-          
-          echo "Build output directory contents:"
-          ls -la bin/targets/
-
-      - name: Check Space Usage
-        run: |
-          echo "Final disk space usage:"
-          df -hT
-          
-          echo "Build directory size:"
-          du -sh $OPENWRT_ROOT_PATH || true
-          
-          echo "Output directory contents:"
-          find $OPENWRT_ROOT_PATH/bin -name "*.img*" -o -name "*.bin" -o -name "*.trx" -o -name "*.tar*" | head -20
-
-      - name: Organize Firmware Files
-        id: organize
-        run: |
-          cd $OPENWRT_ROOT_PATH/bin/targets/*/*
-          rm -rf packages
-          
-          echo "STATUS=success" >> $GITHUB_OUTPUT
-          echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_OUTPUT
-          echo "BUILD_PATH=$PWD" >> $GITHUB_OUTPUT
-          
-          echo "Firmware files organized successfully"
-          ls -la
-
-      - name: Generate Release Tag
-        id: tag
-        run: |
-          echo "RELEASE_TAG=OpenWrt_${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_TARGET }}_${{ env.DEVICE_SUBTARGET }}${{ env.suffix }}_$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-
-      - name: Upload Firmware to Release
-        uses: ncipollo/release-action@v1
-        if: ${{ steps.organize.outputs.STATUS == 'success' && env.FIRMWARE_RELEASE == 'true' }}
-        with:
-          tag: ${{ steps.tag.outputs.RELEASE_TAG }}
-          artifacts: ${{ steps.organize.outputs.BUILD_PATH }}/*
-          name: OpenWrt Firmware ${{ steps.organize.outputs.FILE_DATE }}
-          allowUpdates: true
-          token: ${{ env.GITHUB_TOKEN }}
-          body: |
-            ## OpenWrt Firmware Build Information
-            
-            **Build Date:** ${{ steps.organize.outputs.FILE_DATE }}
-            **Source Branch:** ${{ env.SOURCE_BRANCH }}
-            **Target:** ${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}
-            **Device:** ${{ env.DEVICE_NAME }}
-            **Configuration:** ${{ env.CONFIG_FILE }}
-            **Toolchain Rebuild:** ${{ env.REBUILD_TOOLCHAIN }}
-            **Toolchain Skip:** ${{ env.SKIP_TOOLCHAIN_BUILD }}
-            
-            ### Features
-            - Enhanced workflow with toolchain skip option
-            - Single file toolchain upload (no splitting)
-            - Improved error handling and logging
-            - Configurable build options
-            
-            ### Build Environment
-            - **Platform:** ${{ env.DEVICE_PLATFORM }}
-            - **Vermagic Replacement:** ${{ env.VERMAGIC_REPLACE }}
-            - **SNAPSHOT Vermagic:** ${{ env.SNAPSHOT_VERMAGIC }}
-
-      - name: Delete Workflow Runs
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ env.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 1
-          keep_minimum_runs: 3
-
-      - name: Build Summary
-        run: |
-          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ✅ Success" >> $GITHUB_STEP_SUMMARY
-          echo "- **Target:** ${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Device:** ${{ env.DEVICE_NAME }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ env.SOURCE_BRANCH }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Configuration:** ${{ env.CONFIG_FILE }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Toolchain Skipped:** ${{ env.SKIP_TOOLCHAIN_BUILD }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Build Date:** $(date)" >> $GITHUB_STEP_SUMMARY
-          
-          if [[ "${{ env.FIRMWARE_RELEASE }}" == "true" ]]; then
-            echo "- **Release Tag:** ${{ steps.tag.outputs.RELEASE_TAG }}" >> $GITHUB_STEP_SUMMARY
-          fi
+  - name: Cleanup
+    if: always()
+    run: |
+      echo "🧹 Cleaning up..."
+      cd workspace
+      
+      # Cleanup mount points
+      sudo umount openwrt 2>/dev/null || true
+      sudo umount openwrt-ro 2>/dev/null || true
+      
+      # Remove large directories
+      rm -rf openwrt/build_dir 2>/dev/null || true
+      rm -rf openwrt/staging_dir 2>/dev/null || true
+      rm -rf *.img* 2>/dev/null || true
+      
+      df -hT
+      echo "✅ Cleanup completed"
