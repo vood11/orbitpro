@@ -14,11 +14,6 @@ on:
   repository_dispatch:
   workflow_dispatch:
     inputs:
-      disable_compile_toolchain:
-        description: "Skip toolchain compilation (name-based validation only)"
-        type: boolean
-        default: false
-        required: false
       source:
         description: "Source Branch"
         type: string
@@ -244,35 +239,20 @@ jobs:
 
       - name: Compare Toolchain Hash
         run: |
-          # Initialize REBUILD_CHECK as false
-          echo "REBUILD_CHECK=false" >> $GITHUB_ENV
-          echo "REBUILD_CHECK=false" >> $GITHUB_OUTPUT
-          
-          if [ "${{ github.event.inputs.disable_compile_toolchain }}" == "true" ]; then
-            echo "Skip compilation mode enabled - checking toolchain file existence only..."
-            if [ -f "$TOOLCHAIN_IMAGE.img" ]; then
-              echo "Toolchain file exists, skipping compilation"
-            else
-              echo "Toolchain file not found, will proceed with build"
-              echo "REBUILD_CHECK=true" >> $GITHUB_ENV
-              echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
-            fi
+          if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
+            export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
+            echo "Toolchain hash is $RELEASE_HASH"
           else
-            if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
-              export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-              echo "Toolchain hash is $RELEASE_HASH"
-            else
-              echo "Toolchain hash not found"
-            fi
-            cd $OPENWRT_ROOT_PATH
-            export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
-            echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
-            echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
-            echo "Current hash is $CURRENT_HASH"
-            if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
-              echo "REBUILD_CHECK=true" >> $GITHUB_ENV
-              echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
-            fi
+            echo "Toolchain hash not found"
+          fi
+          cd $OPENWRT_ROOT_PATH
+          export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
+          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
+          echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
+          echo "Current hash is $CURRENT_HASH"
+          if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+            echo "REBUILD_CHECK=true" >> $GITHUB_ENV
+            echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Install Feeds
@@ -319,8 +299,8 @@ jobs:
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
-          # Upload as single file without splitting
-          mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
+          split -d -b 1G $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
+          rm -f $TOOLCHAIN_IMAGE
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
@@ -331,9 +311,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: |
-            ${{ env.TOOLCHAIN_IMAGE }}.img
-            ${{ env.TOOLCHAIN_IMAGE }}.hash
+          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -365,7 +343,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
@@ -373,11 +351,12 @@ jobs:
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
           cd workspace
-          # No need to concatenate files since we're using single file
-          if [ ! -f "$TOOLCHAIN_IMAGE.img" ]; then
-            echo "Error: Toolchain image file not found"
-            exit 1
-          fi
+          for i in {00..09}; do
+            if [ -f "$TOOLCHAIN_IMAGE.img.$i" ]; then
+              cat $TOOLCHAIN_IMAGE.img.$i >> $TOOLCHAIN_IMAGE.img
+              rm -f $TOOLCHAIN_IMAGE.img.$i
+            fi
+          done
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
