@@ -180,14 +180,13 @@ jobs:
             mv "$EXTRACTED_DIR" workspace/openwrt
             cd workspace/openwrt
             
-            # Initialize a git repository for compatibility with later steps
             echo "Initializing a new git repository..."
             git init
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
             git add .
             git commit -m "Initial commit from tag ${SOURCE_BRANCH}"
-            git branch -M ${SOURCE_BRANCH} # Create a branch with the tag name
+            git branch -M ${SOURCE_BRANCH}
             
           else
             echo "Cloning source from branch $SOURCE_BRANCH..."
@@ -216,7 +215,6 @@ jobs:
 
       - name: Apply Custom Patch
         run: |
-          # Extract major version prefix, e.g., v23 from 'openwrt-23.05' or 'v23.05.6'
           VERSION_PREFIX=$(echo "$SOURCE_BRANCH" | grep -oE '(v|openwrt-)[0-9]+' | sed 's/openwrt-/v/')
           
           if [ -z "$VERSION_PREFIX" ]; then
@@ -231,7 +229,6 @@ jobs:
               cp "$PATCH_PATH" "$OPENWRT_ROOT_PATH/"
               cd "$OPENWRT_ROOT_PATH"
               
-              # Check if the patch can be applied cleanly
               if git apply --check "$PATCH_NAME"; then
                 echo "Patch can be applied cleanly. Applying..."
                 git apply "$PATCH_NAME"
@@ -306,7 +303,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ GITHUB.REPOSITORY }}
+          repository: ${{ github.repository }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.hash
           tag: ${{ env.TOOLCHAIN_TAG }}
 
@@ -396,7 +393,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
+          assets: ${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -427,7 +424,7 @@ jobs:
         uses: robinraju/release-downloader@v1.12
         with:
           token: ${{ env.TOKEN }}
-          repository: ${{ GITHUB.REPOSITORY }}
+          repository: ${{ github.repository }}
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
@@ -448,7 +445,6 @@ jobs:
 
       - name: Update Source Code
         run: |
-          # This step is skipped for tags, as they are fixed releases.
           if [[ $SOURCE_BRANCH != v* ]]; then
             cd $OPENWRT_ROOT_PATH
             git config --global user.name "github-actions"
