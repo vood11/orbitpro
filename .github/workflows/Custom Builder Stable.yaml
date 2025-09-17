@@ -51,6 +51,10 @@ on:
         description: "Firmware Release"
         type: boolean
         default: true
+      disable_compile_toolchain:
+        description: "Force skip toolchain compile and use existing cache by name"
+        type: boolean
+        default: false
       toolchain_rebuild:
         description: "Rebuild Toolchain"
         type: boolean
@@ -310,18 +314,28 @@ jobs:
         run: |
           if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
             export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
-            echo "Toolchain hash is $RELEASE_HASH"
+            echo "Found existing toolchain hash: $RELEASE_HASH"
           else
-            echo "Toolchain hash not found"
+            echo "Existing toolchain hash not found."
           fi
+          
           cd $OPENWRT_ROOT_PATH
           export CURRENT_HASH=$(git log --pretty=tformat:"%H" -n1 tools toolchain)
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
-          echo "Current hash is $CURRENT_HASH"
-          if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+          echo "Current toolchain source hash: $CURRENT_HASH"
+
+          if [[ "${{ github.event.inputs.disable_compile_toolchain }}" == "true" ]]; then
+            echo "Toolchain compilation is disabled by user. Assuming existing toolchain is valid and skipping rebuild."
+          elif [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
             echo "REBUILD_CHECK=true" >> $GITHUB_ENV
             echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
+            echo "Toolchain requires rebuild. Reason:"
+            [ -z "$RELEASE_HASH" ] && echo "- No existing toolchain hash found."
+            [ "$CURRENT_HASH" != "$RELEASE_HASH" ] && echo "- Toolchain source has changed."
+            [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ] && echo "- Rebuild was manually triggered."
+          else
+            echo "Toolchain hash matches. Skipping rebuild."
           fi
 
       - name: Install Feeds
@@ -369,23 +383,8 @@ jobs:
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
           
-          MAX_SIZE=$((1900 * 1024 * 1024))
-          FILE_SIZE=$(stat -c%s "$TOOLCHAIN_IMAGE")
-          
-          echo "Toolchain image size: $FILE_SIZE bytes"
-          echo "Max single file size: $MAX_SIZE bytes"
-          
-          if [ "$FILE_SIZE" -ge "$MAX_SIZE" ]; then
-            echo "Image size exceeds limit, splitting into 1G chunks..."
-            split -d -b 1G "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img."
-          else
-            echo "Image size is within limit, uploading as a single file."
-            mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
-          fi
-          
-          if [ -f "$TOOLCHAIN_IMAGE" ]; then
-            rm -f "$TOOLCHAIN_IMAGE"
-          fi
+          echo "Uploading toolchain as a single file."
+          mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
 
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
@@ -429,7 +428,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
@@ -437,23 +436,12 @@ jobs:
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
           cd workspace
-          if [ -f "$TOOLCHAIN_IMAGE.img" ]; then
-            echo "Single toolchain image file found. Preparing for mount."
-          else
-            echo "Split toolchain image files found. Concatenating..."
-            for i in {00..09}; do
-              if [ -f "$TOOLCHAIN_IMAGE.img.$i" ]; then
-                cat "$TOOLCHAIN_IMAGE.img.$i" >> "$TOOLCHAIN_IMAGE.img"
-                rm -f "$TOOLCHAIN_IMAGE.img.$i"
-              fi
-            done
-          fi
-
           if [ ! -f "$TOOLCHAIN_IMAGE.img" ]; then
-            echo "Error: Toolchain image file '$TOOLCHAIN_IMAGE.img' not found."
+            echo "Error: Toolchain image file '$TOOLCHAIN_IMAGE.img' not found after download."
             exit 1
           fi
 
+          echo "Toolchain image found. Preparing for mount."
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop "$TOOLCHAIN_IMAGE.img" openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
@@ -613,4 +601,3 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
-
