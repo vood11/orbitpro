@@ -57,6 +57,10 @@ on:
         description: "Rebuild Toolchain"
         type: boolean
         default: false
+      disable_compile_toolchain:
+        description: "Disable Compile Toolchain (skip compile and assume hash valid)"
+        type: boolean
+        default: false
       vermagic:
         description: "Replace Vermagic"
         type: boolean
@@ -78,7 +82,7 @@ env:
   DIY_SH: ${{ github.event.inputs.diy }}
   FIRMWARE_RELEASE: ${{ github.event.inputs.firmware_release }}
   TOOLCHAIN_REBUILD: ${{ github.event.inputs.toolchain_rebuild }}
-  TOOLCHAIN_TAG: toolchain
+  DISABLE_COMPILE_TOOLCHAIN: ${{ github.event.inputs.disable_compile_toolchain }}
   VERMAGIC: ${{ github.event.inputs.vermagic }}
   VERMAGIC_OPT: ${{ github.event.inputs.vermagic_opt }}
   TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -250,9 +254,16 @@ jobs:
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_ENV
           echo "CURRENT_HASH=$CURRENT_HASH" >> $GITHUB_OUTPUT
           echo "Current hash is $CURRENT_HASH"
-          if [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
+          if [ "${{ env.DISABLE_COMPILE_TOOLCHAIN }}" == "true" ]; then
+            echo "Disable compile toolchain enabled, assuming hash valid and skipping rebuild"
+            echo "REBUILD_CHECK=false" >> $GITHUB_ENV
+            echo "REBUILD_CHECK=false" >> $GITHUB_OUTPUT
+          elif [ -z "$RELEASE_HASH" ] || [ "$CURRENT_HASH" != "$RELEASE_HASH" ] || [ "${{ env.TOOLCHAIN_REBUILD }}" == "true" ]; then
             echo "REBUILD_CHECK=true" >> $GITHUB_ENV
             echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
+          else
+            echo "REBUILD_CHECK=false" >> $GITHUB_ENV
+            echo "REBUILD_CHECK=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Install Feeds
@@ -299,8 +310,7 @@ jobs:
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
-          split -d -b 1G $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
-          rm -f $TOOLCHAIN_IMAGE
+          mv $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
@@ -343,7 +353,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
@@ -351,12 +361,6 @@ jobs:
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
           cd workspace
-          for i in {00..09}; do
-            if [ -f "$TOOLCHAIN_IMAGE.img.$i" ]; then
-              cat $TOOLCHAIN_IMAGE.img.$i >> $TOOLCHAIN_IMAGE.img
-              rm -f $TOOLCHAIN_IMAGE.img.$i
-            fi
-          done
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
