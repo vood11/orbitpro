@@ -23,7 +23,7 @@ on:
         description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
-        default: "v24.10.2"
+        default: "v23.05.6"
       config_file:
         description: "Config Name"
         type: choice
@@ -597,3 +597,4 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
