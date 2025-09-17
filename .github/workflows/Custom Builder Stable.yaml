@@ -323,8 +323,6 @@ jobs:
             echo "REBUILD_CHECK=true" >> $GITHUB_ENV
             echo "REBUILD_CHECK=true" >> $GITHUB_OUTPUT
           fi
-
-
       
       - name: Install Feeds
         if: ${{ env.REBUILD_CHECK == 'true' }}
@@ -367,28 +365,12 @@ jobs:
         id: toolchain
         if: ${{ env.REBUILD_CHECK == 'true' }}
         run: |
+          # Menghapus logika pemisahan file, selalu unggah sebagai file tunggal
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
+          mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
           
-          MAX_SIZE=$((1900 * 1024 * 1024))
-          FILE_SIZE=$(stat -c%s "$TOOLCHAIN_IMAGE")
-          
-          echo "Toolchain image size: $FILE_SIZE bytes"
-          echo "Max single file size: $MAX_SIZE bytes"
-          
-          if [ "$FILE_SIZE" -ge "$MAX_SIZE" ]; then
-            echo "Image size exceeds limit, splitting into 1G chunks..."
-            split -d -b 1G "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img."
-          else
-            echo "Image size is within limit, uploading as a single file."
-            mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
-          fi
-          
-          if [ -f "$TOOLCHAIN_IMAGE" ]; then
-            rm -f "$TOOLCHAIN_IMAGE"
-          fi
-
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
@@ -431,26 +413,16 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
+          # Mengubah pola nama file untuk hanya mengunduh file tunggal
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
       - name: Prepare Toolchain Image
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
+          # Menghapus logika penggabungan file, hanya menangani file tunggal
           cd workspace
-          if [ -f "$TOOLCHAIN_IMAGE.img" ]; then
-            echo "Single toolchain image file found. Preparing for mount."
-          else
-            echo "Split toolchain image files found. Concatenating..."
-            for i in {00..09}; do
-              if [ -f "$TOOLCHAIN_IMAGE.img.$i" ]; then
-                cat "$TOOLCHAIN_IMAGE.img.$i" >> "$TOOLCHAIN_IMAGE.img"
-                rm -f "$TOOLCHAIN_IMAGE.img.$i"
-              fi
-            done
-          fi
-
           if [ ! -f "$TOOLCHAIN_IMAGE.img" ]; then
             echo "Error: Toolchain image file '$TOOLCHAIN_IMAGE.img' not found."
             exit 1
