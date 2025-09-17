@@ -19,13 +19,6 @@ on:
         type: boolean
         default: false
         required: false
-      workflow_dispatch:
-    inputs:
-      disable_compile_toolchain:
-        description: "Skip toolchain compilation (name-based validation only)"
-        type: boolean
-        default: false
-        required: false
       source:
         description: "Source Branch"
         type: string
