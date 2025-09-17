@@ -83,6 +83,7 @@ env:
   FIRMWARE_RELEASE: ${{ github.event.inputs.firmware_release }}
   TOOLCHAIN_REBUILD: ${{ github.event.inputs.toolchain_rebuild }}
   DISABLE_COMPILE_TOOLCHAIN: ${{ github.event.inputs.disable_compile_toolchain }}
+  TOOLCHAIN_TAG: toolchain
   VERMAGIC: ${{ github.event.inputs.vermagic }}
   VERMAGIC_OPT: ${{ github.event.inputs.vermagic_opt }}
   TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -243,8 +244,8 @@ jobs:
 
       - name: Compare Toolchain Hash
         run: |
-          if [ -f "$TOOLCHAIN_IMAGE.hash" ]; then
-            export RELEASE_HASH=$(cat $TOOLCHAIN_IMAGE.hash)
+          if [ -f "${{ env.TOOLCHAIN_IMAGE }}.hash" ]; then
+            export RELEASE_HASH=$(cat ${{ env.TOOLCHAIN_IMAGE }}.hash)
             echo "Toolchain hash is $RELEASE_HASH"
           else
             echo "Toolchain hash not found"
@@ -308,11 +309,11 @@ jobs:
         if: ${{ env.REBUILD_CHECK == 'true' }}
         run: |
           cd workspace
-          mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
+          mksquashfs openwrt ${{ env.TOOLCHAIN_IMAGE }} -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
-          mv $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img
+          mv ${{ env.TOOLCHAIN_IMAGE }} $GITHUB_WORKSPACE/output/${{ env.TOOLCHAIN_IMAGE }}.img
           cd $OPENWRT_ROOT_PATH
-          echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
+          echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/${{ env.TOOLCHAIN_IMAGE }}.hash
           ls -lh $GITHUB_WORKSPACE/output
 
       - name: Delete Old Toolchain Assets From Release
@@ -321,7 +322,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
+          assets: ${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -342,7 +343,7 @@ jobs:
         run: |
           cd workspace
           if [[ "$REBUILD_CHECK" == "true" ]]; then
-            rm -rf $TOOLCHAIN_IMAGE output
+            rm -rf ${{ env.TOOLCHAIN_IMAGE }} output
           else
             rm -rf openwrt
           fi
@@ -362,7 +363,7 @@ jobs:
         run: |
           cd workspace
           mkdir -p openwrt-ro openwrt workdir overlay
-          sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
+          sudo mount -o loop ${{ env.TOOLCHAIN_IMAGE }}.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
 
       - name: Update Source Code
