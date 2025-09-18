@@ -582,3 +582,5 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
+
