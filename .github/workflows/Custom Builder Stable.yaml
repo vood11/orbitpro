@@ -365,7 +365,6 @@ jobs:
         id: toolchain
         if: ${{ env.REBUILD_CHECK == 'true' }}
         run: |
-          # Menghapus logika pemisahan file, selalu unggah sebagai file tunggal
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
@@ -381,7 +380,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
+          assets: ${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -413,7 +412,6 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          # Mengubah pola nama file untuk hanya mengunduh file tunggal
           fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
@@ -421,13 +419,10 @@ jobs:
       - name: Prepare Toolchain Image
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
-          # Menghapus logika penggabungan file, hanya menangani file tunggal
+          # Disederhanakan: Tidak ada lagi pengecekan atau penggabungan file terpisah.
+          # Langsung mengasumsikan file .img tunggal telah diunduh.
           cd workspace
-          if [ ! -f "$TOOLCHAIN_IMAGE.img" ]; then
-            echo "Error: Toolchain image file '$TOOLCHAIN_IMAGE.img' not found."
-            exit 1
-          fi
-
+          echo "Mounting single toolchain image: $TOOLCHAIN_IMAGE.img"
           mkdir -p openwrt-ro openwrt workdir overlay
           sudo mount -o loop "$TOOLCHAIN_IMAGE.img" openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
