@@ -259,10 +259,10 @@ jobs:
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          cd $OPENWRT_ROOT_PATH
           export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+          cd $OPENWRT_ROOT_PATH
           export DEVICE_NAME=$(grep 'CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/')
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_ENV
           echo "DEVICE_NAME=$DEVICE_NAME" >> $GITHUB_OUTPUT
@@ -275,11 +275,7 @@ jobs:
           export DEVICE_SUBTARGET=$(grep 'CONFIG_TARGET_SUBTARGET' .config | awk -F '"' '{print $2}')
           echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
           echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_OUTPUT
-          if [ "$SOURCE_OWNER" == "$SOURCE_REPO" ]; then
-            export TOOLCHAIN_IMAGE="toolchain-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_NAME-$DEVICE_TARGET-$DEVICE_SUBTARGET"
-          else
-            export TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_NAME-$DEVICE_TARGET-$DEVICE_SUBTARGET"
-          fi
+          export TOOLCHAIN_IMAGE="toolchain-$SOURCE_OWNER-$SOURCE_REPO-$SOURCE_BRANCH-$DEVICE_TARGET-$DEVICE_SUBTARGET"
           echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_ENV
           echo "TOOLCHAIN_IMAGE=$TOOLCHAIN_IMAGE" >> $GITHUB_OUTPUT
           export BUILD_DATE=$(date +"%Y-%m-%d-%H%M")
@@ -372,8 +368,8 @@ jobs:
           cd workspace
           mksquashfs openwrt $TOOLCHAIN_IMAGE -force-gid 1001 -force-uid 1001 -comp zstd -Xcompression-level 19
           mkdir -p $GITHUB_WORKSPACE/output
-          mv "$TOOLCHAIN_IMAGE" "$GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img"
-          
+          split -d -b 1G $TOOLCHAIN_IMAGE $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.img.
+          rm -f $TOOLCHAIN_IMAGE
           cd $OPENWRT_ROOT_PATH
           echo $CURRENT_HASH > $GITHUB_WORKSPACE/output/$TOOLCHAIN_IMAGE.hash
           ls -lh $GITHUB_WORKSPACE/output
@@ -384,7 +380,7 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           tag: ${{ env.TOOLCHAIN_TAG }}
-          assets: ${{ env.TOOLCHAIN_IMAGE }}.*
+          assets: toolchain-${{ env.TOOLCHAIN_IMAGE }}.*
           fail-if-no-assets: false
           fail-if-no-release: false
 
@@ -416,19 +412,22 @@ jobs:
         with:
           token: ${{ env.TOKEN }}
           repository: ${{ GITHUB.REPOSITORY }}
-          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img
+          fileName: ${{ env.TOOLCHAIN_IMAGE }}.img.*
           tag: ${{ env.TOOLCHAIN_TAG }}
           out-file-path: workspace
 
       - name: Prepare Toolchain Image
         if: ${{ steps.toolchain.outcome == 'skipped' }}
         run: |
-          # Disederhanakan: Tidak ada lagi pengecekan atau penggabungan file terpisah.
-          # Langsung mengasumsikan file .img tunggal telah diunduh.
           cd workspace
-          echo "Mounting single toolchain image: $TOOLCHAIN_IMAGE.img"
+          for i in {00..09}; do
+            if [ -f "$TOOLCHAIN_IMAGE.img.$i" ]; then
+              cat $TOOLCHAIN_IMAGE.img.$i >> $TOOLCHAIN_IMAGE.img
+              rm -f $TOOLCHAIN_IMAGE.img.$i
+            fi
+          done
           mkdir -p openwrt-ro openwrt workdir overlay
-          sudo mount -o loop "$TOOLCHAIN_IMAGE.img" openwrt-ro
+          sudo mount -o loop $TOOLCHAIN_IMAGE.img openwrt-ro
           sudo mount -t overlay overlay -o lowerdir=openwrt-ro,upperdir=overlay,workdir=workdir openwrt
 
       - name: Update Source Code
@@ -586,4 +585,3 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
-
