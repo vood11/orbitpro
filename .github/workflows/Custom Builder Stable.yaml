@@ -151,49 +151,54 @@ jobs:
         id: clone
         run: |
           mkdir -p workspace
-          if [[ $SOURCE_BRANCH == v* ]]; then
-            echo "Downloading source for tag $SOURCE_BRANCH via ZIP archive..."
-            URL="${SOURCE_URL}/archive/refs/tags/${SOURCE_BRANCH}.zip"
-            
-            retry_count=0
-            until curl -L -o workspace/openwrt.zip "$URL" || [ $retry_count -ge $MAX_RETRIES ]; do
-              retry_count=$((retry_count+1))
-              echo "Download failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
-              sleep $RETRY_DELAY
-            done
+          
+          # --- UNIFIED GIT CLONE LOGIC ---
+          TARGET_REF="$SOURCE_BRANCH"
+          IS_TAG=false
+          
+          # Determine if the input is a tag/release
+          if [[ "$TARGET_REF" == v* ]]; then
+            IS_TAG=true
+            TAG_TO_CHECKOUT="$TARGET_REF"
+          elif [[ "$TARGET_REF" =~ ^openwrt-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            IS_TAG=true
+            TAG_TO_CHECKOUT="v${TARGET_REF#openwrt-}"
+          else
+            # It's a regular branch
+            CLONE_BRANCH="$TARGET_REF"
+          fi
 
-            if [ ! -f "workspace/openwrt.zip" ]; then
-                echo "Failed to download source archive after $MAX_RETRIES attempts"
-                exit 1
-            fi
-
-            unzip -q workspace/openwrt.zip -d workspace/
-            rm workspace/openwrt.zip
+          # --- CLONING LOGIC ---
+          if [[ "$IS_TAG" == "true" ]]; then
+            echo "Target is a tag: $TAG_TO_CHECKOUT."
+            echo "Cloning default branch from $SOURCE_URL to get repository base..."
             
-            EXTRACTED_DIR=$(find workspace/ -maxdepth 1 -type d -name "openwrt-*")
-            if [ -z "$EXTRACTED_DIR" ]; then
-              echo "Could not find extracted directory."
+            # For tags, we clone the repo without specifying a branch to get the default one.
+            # Then we fetch tags from the upstream (original OpenWrt) repo and check out the specific tag.
+            git clone "$SOURCE_URL" workspace/openwrt
+            if [ $? -ne 0 ]; then
+              echo "::error::Failed to clone repository $SOURCE_URL"
               exit 1
             fi
-            mv "$EXTRACTED_DIR" workspace/openwrt
             cd workspace/openwrt
+
+            echo "Fetching tags from upstream repository: $SOURCE_ORIGIN"
+            git remote add upstream "$SOURCE_ORIGIN"
+            git fetch upstream --tags
             
-            echo "Initializing a new git repository..."
-            git init
-            git config --global user.name "github-actions"
-            git config --global user.email "github-actions@github.com"
-            git add .
-            git commit -m "Initial commit from tag ${SOURCE_BRANCH}"
-            git branch -M ${SOURCE_BRANCH}
-            
+            echo "Checking out tag '$TAG_TO_CHECKOUT'..."
+            git checkout "tags/$TAG_TO_CHECKOUT"
+            if [ $? -ne 0 ]; then
+              echo "::error::Failed to checkout tag '$TAG_TO_CHECKOUT'. It might not exist in the upstream repo."
+              exit 1
+            fi
+
           else
-            # --- FIX START ---
-            # Determine the actual branch to clone by stripping the patch version if it exists
-            CLONE_BRANCH=$(echo "$SOURCE_BRANCH" | cut -d'.' -f1,2)
-            echo "Cloning source from base branch $CLONE_BRANCH..."
+            # For branches, we clone the specific branch directly.
+            echo "Target is a branch: $CLONE_BRANCH. Cloning directly."
             
             retry_count=0
-            until git clone --single-branch $SOURCE_URL -b $CLONE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+            until git clone --single-branch --branch "$CLONE_BRANCH" "$SOURCE_URL" workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
               retry_count=$((retry_count+1))
               echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
               sleep $RETRY_DELAY
@@ -201,34 +206,16 @@ jobs:
             done
 
             if [ ! -d "workspace/openwrt" ]; then
-                echo "Failed to clone source repository after $MAX_RETRIES attempts"
-                exit 1
-            fi
-
-            cd workspace/openwrt
-            git config --global user.name "github-actions"
-            git config --global user.email "github-actions@github.com"
-
-            # If the original input included a patch version, checkout the corresponding tag
-            if [[ "$SOURCE_BRANCH" =~ ^openwrt-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                TAG_TO_CHECKOUT="v${SOURCE_BRANCH#openwrt-}"
-                echo "Specific version provided. Checking out tag $TAG_TO_CHECKOUT..."
-                git checkout "tags/$TAG_TO_CHECKOUT"
-            else
-                # For regular branches, merge with upstream to get the latest code
-                echo "Syncing with upstream branch $CLONE_BRANCH..."
-                git remote add upstream $SOURCE_ORIGIN
-                git fetch upstream $CLONE_BRANCH
-                git merge upstream/$CLONE_BRANCH
-            fi
-            # --- FIX END ---
-          fi
-
-          if [ ! -d "$PWD" ]; then
-              echo "Failed to prepare source code directory"
+              echo "::error::Failed to clone source repository. The branch '$CLONE_BRANCH' might not exist in '$SOURCE_URL'."
               exit 1
+            fi
+            cd workspace/openwrt
           fi
-
+          # --- END CLONING LOGIC ---
+          
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_ENV
           echo "OPENWRT_ROOT_PATH=$PWD" >> $GITHUB_OUTPUT
 
@@ -610,7 +597,7 @@ jobs:
           name: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           commit: ${{ github.sha }}
           tag: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
-          artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
+          artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.SUBTARGET }}/*
           replacesArtifacts: true
           allowUpdates: true
           prerelease: false
