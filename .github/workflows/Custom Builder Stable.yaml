@@ -187,20 +187,41 @@ jobs:
             git branch -M ${SOURCE_BRANCH}
             
           else
-            echo "Cloning source from branch $SOURCE_BRANCH..."
+            # --- FIX START ---
+            # Determine the actual branch to clone by stripping the patch version if it exists
+            CLONE_BRANCH=$(echo "$SOURCE_BRANCH" | cut -d'.' -f1,2)
+            echo "Cloning source from base branch $CLONE_BRANCH..."
+            
             retry_count=0
-            until git clone --single-branch $SOURCE_URL -b $SOURCE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+            until git clone --single-branch $SOURCE_URL -b $CLONE_BRANCH workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
               retry_count=$((retry_count+1))
               echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
               sleep $RETRY_DELAY
               rm -rf workspace/openwrt
             done
+
+            if [ ! -d "workspace/openwrt" ]; then
+                echo "Failed to clone source repository after $MAX_RETRIES attempts"
+                exit 1
+            fi
+
             cd workspace/openwrt
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
-            git remote add upstream $SOURCE_ORIGIN
-            git fetch upstream $SOURCE_BRANCH
-            git merge upstream/$SOURCE_BRANCH
+
+            # If the original input included a patch version, checkout the corresponding tag
+            if [[ "$SOURCE_BRANCH" =~ ^openwrt-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                TAG_TO_CHECKOUT="v${SOURCE_BRANCH#openwrt-}"
+                echo "Specific version provided. Checking out tag $TAG_TO_CHECKOUT..."
+                git checkout "tags/$TAG_TO_CHECKOUT"
+            else
+                # For regular branches, merge with upstream to get the latest code
+                echo "Syncing with upstream branch $CLONE_BRANCH..."
+                git remote add upstream $SOURCE_ORIGIN
+                git fetch upstream $CLONE_BRANCH
+                git merge upstream/$CLONE_BRANCH
+            fi
+            # --- FIX END ---
           fi
 
           if [ ! -d "$PWD" ]; then
@@ -260,7 +281,7 @@ jobs:
           export SOURCE_REPO=$(echo $SOURCE_URL | awk -F '/' '{print $NF}' | sed 's/\.git$//')
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_ENV
           echo "SOURCE_REPO=$SOURCE_REPO" >> $GITHUB_OUTPUT
-          export CURRENT_BRANCH=$(git symbolic-ref --short HEAD)
+          export CURRENT_BRANCH=$(git symbolic-ref --short -q HEAD || git rev-parse --short HEAD)
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_ENV
           echo "CURRENT_BRANCH=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
           cd $OPENWRT_ROOT_PATH
@@ -466,21 +487,38 @@ jobs:
           if [[ $SOURCE_BRANCH == v* ]]; then
             release_version="${SOURCE_BRANCH#v}"
           else
-            snapshot_version="${SOURCE_BRANCH#openwrt-}"
+            # --- FIX START ---
+            # Always get only the major.minor version for searching tags
+            snapshot_version_full="${SOURCE_BRANCH#openwrt-}"
+            snapshot_version_major_minor=$(echo "$snapshot_version_full" | cut -d'.' -f1,2)
+            # --- FIX END ---
+            
             release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
-              | grep -m1 -oE "\"name\":\s*\"v${snapshot_version}\.[^\"]+\"" \
+              | grep -m1 -oE "\"name\":\s*\"v${snapshot_version_major_minor}\.[^\"]+\"" \
               | cut -d'"' -f4 | sed 's/^v//')
           fi
 
           if [[ "$VERMAGIC_OPT" == "true" && $SOURCE_BRANCH != v* ]]; then
-            version="${snapshot_version}-SNAPSHOT"
+            # Use the full snapshot version for SNAPSHOT builds
+            version="${snapshot_version_full}-SNAPSHOT"
           else
             version="${release_version}"
+          fi
+          
+          if [ -z "$version" ]; then
+            echo "::error::Could not determine release version. Halting build."
+            exit 1
           fi
           
           kmods=$(curl -s https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/ \
             | grep -oP '<td class="n"><a href="\K[^/]+|<td class="d">\K[^<]+' \
             | paste -d '|' - - | sort -t '|' -k2 | head -n1 | cut -d '|' -f1)
+          
+          if [ -z "$kmods" ]; then
+            echo "::error::Could not find kmods for version ${version}. Halting build."
+            exit 1
+          fi
+
           echo "src/gz openwrt_kmods https://downloads.openwrt.org/releases/${version}/targets/${DEVICE_TARGET}/${DEVICE_SUBTARGET}/kmods/${kmods}" >> ./custom/files/etc/opkg/customfeeds.conf
           cd $OPENWRT_ROOT_PATH
           grep -q '^CONFIG_VERSION_REPO=' ./.config \
@@ -586,3 +624,4 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
