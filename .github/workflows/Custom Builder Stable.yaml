@@ -152,9 +152,6 @@ jobs:
         run: |
           mkdir -p workspace
           
-          # --- FINAL LOGIC ---
-          # If the input starts with 'v', it's a tag. Otherwise, it's a branch.
-          
           if [[ "$SOURCE_BRANCH" == v* ]]; then
             # Handle tags
             echo "Input '$SOURCE_BRANCH' is a tag. Cloning default branch and checking out tag."
@@ -178,7 +175,7 @@ jobs:
             fi
 
           else
-            # Handle branches (e.g., openwrt-24.10 or openwrt-24.10.1)
+            # Handle branches
             echo "Input '$SOURCE_BRANCH' is a branch. Cloning directly."
             
             retry_count=0
@@ -194,6 +191,10 @@ jobs:
               exit 1
             fi
             cd workspace/openwrt
+            
+            # --- FIX: Add the upstream remote so later steps can use it ---
+            echo "Adding upstream remote: $SOURCE_ORIGIN"
+            git remote add upstream "$SOURCE_ORIGIN"
           fi
           
           git config --global user.name "github-actions"
@@ -219,7 +220,6 @@ jobs:
               cp "$PATCH_PATH" "$OPENWRT_ROOT_PATH/"
               cd "$OPENWRT_ROOT_PATH"
               
-              # Check if the patch can be applied cleanly
               if git apply --check "$PATCH_NAME"; then
                 echo "Patch can be applied cleanly. Applying..."
                 git apply "$PATCH_NAME"
