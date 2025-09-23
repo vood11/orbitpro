@@ -28,7 +28,7 @@ on:
           - openwrt-24.10
           - v22.03.7
           - v23.05.6
-          - v24.10.2
+          - v24.10.1
       config_file:
         description: "Config Name"
         type: choice
@@ -37,6 +37,7 @@ on:
           - openwrt.config-openclash
           - openwrt.config-passwall
           - openwrt.config-custom
+          - opi-cm4.config
       config_link:
         description: "Use Config URL"
         type: boolean
