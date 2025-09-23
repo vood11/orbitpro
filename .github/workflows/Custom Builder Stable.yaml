@@ -152,29 +152,13 @@ jobs:
         run: |
           mkdir -p workspace
           
-          # --- UNIFIED GIT CLONE LOGIC ---
-          TARGET_REF="$SOURCE_BRANCH"
-          IS_TAG=false
+          # --- FINAL LOGIC ---
+          # If the input starts with 'v', it's a tag. Otherwise, it's a branch.
           
-          # Determine if the input is a tag/release
-          if [[ "$TARGET_REF" == v* ]]; then
-            IS_TAG=true
-            TAG_TO_CHECKOUT="$TARGET_REF"
-          elif [[ "$TARGET_REF" =~ ^openwrt-[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            IS_TAG=true
-            TAG_TO_CHECKOUT="v${TARGET_REF#openwrt-}"
-          else
-            # It's a regular branch
-            CLONE_BRANCH="$TARGET_REF"
-          fi
-
-          # --- CLONING LOGIC ---
-          if [[ "$IS_TAG" == "true" ]]; then
-            echo "Target is a tag: $TAG_TO_CHECKOUT."
-            echo "Cloning default branch from $SOURCE_URL to get repository base..."
+          if [[ "$SOURCE_BRANCH" == v* ]]; then
+            # Handle tags
+            echo "Input '$SOURCE_BRANCH' is a tag. Cloning default branch and checking out tag."
             
-            # For tags, we clone the repo without specifying a branch to get the default one.
-            # Then we fetch tags from the upstream (original OpenWrt) repo and check out the specific tag.
             git clone "$SOURCE_URL" workspace/openwrt
             if [ $? -ne 0 ]; then
               echo "::error::Failed to clone repository $SOURCE_URL"
@@ -186,19 +170,19 @@ jobs:
             git remote add upstream "$SOURCE_ORIGIN"
             git fetch upstream --tags
             
-            echo "Checking out tag '$TAG_TO_CHECKOUT'..."
-            git checkout "tags/$TAG_TO_CHECKOUT"
+            echo "Checking out tag '$SOURCE_BRANCH'..."
+            git checkout "tags/$SOURCE_BRANCH"
             if [ $? -ne 0 ]; then
-              echo "::error::Failed to checkout tag '$TAG_TO_CHECKOUT'. It might not exist in the upstream repo."
+              echo "::error::Failed to checkout tag '$SOURCE_BRANCH'. It might not exist in the upstream repo."
               exit 1
             fi
 
           else
-            # For branches, we clone the specific branch directly.
-            echo "Target is a branch: $CLONE_BRANCH. Cloning directly."
+            # Handle branches (e.g., openwrt-24.10 or openwrt-24.10.1)
+            echo "Input '$SOURCE_BRANCH' is a branch. Cloning directly."
             
             retry_count=0
-            until git clone --single-branch --branch "$CLONE_BRANCH" "$SOURCE_URL" workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
+            until git clone --single-branch --branch "$SOURCE_BRANCH" "$SOURCE_URL" workspace/openwrt || [ $retry_count -ge $MAX_RETRIES ]; do
               retry_count=$((retry_count+1))
               echo "Clone failed, retrying in $RETRY_DELAY seconds... ($retry_count/$MAX_RETRIES)"
               sleep $RETRY_DELAY
@@ -206,12 +190,11 @@ jobs:
             done
 
             if [ ! -d "workspace/openwrt" ]; then
-              echo "::error::Failed to clone source repository. The branch '$CLONE_BRANCH' might not exist in '$SOURCE_URL'."
+              echo "::error::Failed to clone source repository. The branch '$SOURCE_BRANCH' might not exist in '$SOURCE_URL'."
               exit 1
             fi
             cd workspace/openwrt
           fi
-          # --- END CLONING LOGIC ---
           
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
@@ -474,11 +457,8 @@ jobs:
           if [[ $SOURCE_BRANCH == v* ]]; then
             release_version="${SOURCE_BRANCH#v}"
           else
-            # --- FIX START ---
-            # Always get only the major.minor version for searching tags
             snapshot_version_full="${SOURCE_BRANCH#openwrt-}"
             snapshot_version_major_minor=$(echo "$snapshot_version_full" | cut -d'.' -f1,2)
-            # --- FIX END ---
             
             release_version=$(curl -s https://api.github.com/repos/openwrt/openwrt/tags \
               | grep -m1 -oE "\"name\":\s*\"v${snapshot_version_major_minor}\.[^\"]+\"" \
@@ -486,7 +466,6 @@ jobs:
           fi
 
           if [[ "$VERMAGIC_OPT" == "true" && $SOURCE_BRANCH != v* ]]; then
-            # Use the full snapshot version for SNAPSHOT builds
             version="${snapshot_version_full}-SNAPSHOT"
           else
             version="${release_version}"
@@ -597,7 +576,7 @@ jobs:
           name: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
           commit: ${{ github.sha }}
           tag: ${{ env.SOURCE_BRANCH }}_${{ env.DEVICE_NAME }}${{ env.suffix }}
-          artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.SUBTARGET }}/*
+          artifacts: ${{ env.OPENWRT_ROOT_PATH }}/bin/targets/${{ env.DEVICE_TARGET }}/${{ env.DEVICE_SUBTARGET }}/*
           replacesArtifacts: true
           allowUpdates: true
           prerelease: false
