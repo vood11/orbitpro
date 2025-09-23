@@ -429,8 +429,14 @@ jobs:
             cd $OPENWRT_ROOT_PATH
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
-            git fetch upstream $SOURCE_BRANCH
-            git merge upstream/$SOURCE_BRANCH
+            
+            # --- FIX: Fetch the corresponding base branch (e.g., openwrt-24.10) from upstream ---
+            # --- as the patch version branch (e.g., openwrt-24.10.1) may not exist there. ---
+            UPSTREAM_BRANCH=$(echo "$SOURCE_BRANCH" | cut -d'.' -f1,2)
+            echo "Fetching and merging from upstream branch: $UPSTREAM_BRANCH"
+            
+            git fetch upstream "$UPSTREAM_BRANCH"
+            git merge "upstream/$UPSTREAM_BRANCH"
           else
             echo "Skipping source update for tag-based build."
           fi
