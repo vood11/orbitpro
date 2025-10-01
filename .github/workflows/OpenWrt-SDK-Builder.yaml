@@ -24,7 +24,7 @@ on:
         description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
-        default: "v24.10.3"
+        default: "v23.05.6"
       DEVICE:
         description: "Select the target device and profile"
         type: choice
@@ -207,7 +207,6 @@ jobs:
             fi
             cd workspace/openwrt
             
-            # --- FIX: Add the upstream remote so later steps can use it ---
             echo "Adding upstream remote: $SOURCE_ORIGIN"
             git remote add upstream "$SOURCE_ORIGIN"
           fi
@@ -454,8 +453,12 @@ jobs:
             git config --global user.name "github-actions"
             git config --global user.email "github-actions@github.com"
             
-            # --- FIX: Fetch the corresponding base branch (e.g., openwrt-24.10) from upstream ---
-            # --- as the patch version branch (e.g., openwrt-24.10.1) may not exist there. ---
+            # --- FIX: Ensure the upstream remote exists before fetching ---
+            if ! git remote -v | grep -q "upstream"; then
+              echo "Upstream remote not found. Adding it."
+              git remote add upstream "$SOURCE_ORIGIN"
+            fi
+            
             UPSTREAM_BRANCH=$(echo "$SOURCE_BRANCH" | cut -d'.' -f1,2)
             echo "Fetching and merging from upstream branch: $UPSTREAM_BRANCH"
             
