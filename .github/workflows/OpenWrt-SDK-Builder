@@ -24,7 +24,7 @@ on:
         description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
-        default: "v24.10.3"
+        default: "v23.05.6"
       DEVICE:
         description: "Select the target device and profile"
         type: choice
@@ -231,15 +231,22 @@ jobs:
             echo "Looking for patch file: $PATCH_PATH"
             
             if [ -f "$PATCH_PATH" ]; then
-              echo "Found patch file: $PATCH_NAME"
+              echo "Found patch file: $PATCH_NAME. Applying with 'git am'."
               cp "$PATCH_PATH" "$OPENWRT_ROOT_PATH/"
               cd "$OPENWRT_ROOT_PATH"
               
-              if git apply --check "$PATCH_NAME"; then
-                echo "Patch can be applied cleanly. Applying..."
-                git apply "$PATCH_NAME"
+              # Initialize a clean git state to apply the patch
+              rm -rf .git
+              git init
+              git add .
+              git commit -m "Initial commit of source code"
+              
+              echo "Attempting to apply patch with 3-way merge..."
+              if git am --3way "$PATCH_NAME"; then
+                echo "Patch applied successfully."
               else
-                echo "Patch check failed. The patch may not be compatible with the source. Skipping application."
+                echo "::warning::Failed to apply patch. Aborting patch and continuing build."
+                git am --abort
               fi
             else
               echo "Patch file not found for this version. Skipping."
@@ -611,3 +618,4 @@ jobs:
             - Device Platform: ${{ env.DEVICE_PLATFORM }}
             - Device Name: ${{ env.DEVICE_NAME }}
             - Build Date: ${{ env.BUILD_DATE }}
+
