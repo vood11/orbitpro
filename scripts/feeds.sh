@@ -2,7 +2,7 @@
 
 cat >> ./feeds.conf.default <<EOF
 # Extra Feeds
-src-git kwrt https://github.com/kiddin9/kwrt-packages.git
+# src-git kwrt https://github.com/kiddin9/kwrt-packages.git
 # src-git small_package https://github.com/vood11/small-package
 # src-git openwrt_packages https://github.com/kenzok8/openwrt-packages
 # src-git small https://github.com/kenzok8/small
