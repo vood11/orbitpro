@@ -263,6 +263,7 @@ jobs:
           echo -e "\nCONFIG_ALL=y\nCONFIG_ALL_NONSHARED=y" >> $OPENWRT_ROOT_PATH/.config
           cd $OPENWRT_ROOT_PATH
           make defconfig
+          yes '' | make oldconfig
 
       - name: Generate Variables
         id: env
@@ -357,6 +358,7 @@ jobs:
           fi
           cd $OPENWRT_ROOT_PATH
           make defconfig
+          yes '' | make oldconfig
 
       - name: Compile Tools
         if: ${{ env.REBUILD_CHECK == 'true' }}
@@ -530,6 +532,7 @@ jobs:
           fi
           cd $OPENWRT_ROOT_PATH
           make defconfig
+          yes '' | make oldconfig
           mkdir bin
           cp .config ./bin/build.config
 
