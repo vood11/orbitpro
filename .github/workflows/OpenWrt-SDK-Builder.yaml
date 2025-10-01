@@ -24,7 +24,7 @@ on:
         description: "Source Branch or Tag (e.g., openwrt-23.05 or v22.03.7)"
         type: string
         required: true
-        default: "v23.05.6"
+        default: "v24.10.3"
       DEVICE:
         description: "Select the target device and profile"
         type: choice
@@ -556,11 +556,16 @@ jobs:
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
-      - name: Compile Packages
+      - name: Finalize Configuration & Compile Packages
         timeout-minutes: 180
         run: |
           cd $OPENWRT_ROOT_PATH
-          echo -e "$(nproc) Thread Compile"
+          # Finalize configuration to accept defaults for new options
+          echo "Finalizing configuration..."
+          make defconfig
+          yes '' | make oldconfig
+          
+          echo -e "\n$(nproc) Thread Compile"
           make clean
           make buildinfo
           make diffconfig buildversion feedsversion
