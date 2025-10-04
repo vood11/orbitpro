@@ -559,21 +559,26 @@ jobs:
           find dl -size -1024c -exec ls -l {} \;
           find dl -size -1024c -exec rm -f {} \;
 
-      - name: Finalize Configuration & Compile Packages
+      - name: Compile Firmware
         timeout-minutes: 180
         run: |
           cd $OPENWRT_ROOT_PATH
-          # Finalize configuration to accept defaults for new options
-          echo "Finalizing configuration..."
+          
+          echo "Finalizing configuration and starting main compile..."
           make defconfig
           yes '' | make oldconfig
-          
+
           echo -e "\n$(nproc) Thread Compile"
-          make clean
           make buildinfo
           make diffconfig buildversion feedsversion
-          make target/compile -j$(($(nproc) + 1)) IGNORE_ERRORS="m n" BUILD_LOG=1 || \
-          yes n | make target/compile -j1 V=s IGNORE_ERRORS=1
+          
+          # Pipe 'yes ""' directly into the main compile commands to auto-accept defaults for any new options.
+          # This is the most robust method to prevent interactive prompts from halting the build.
+          # The fallback is also changed from 'yes n' to 'yes ""' to accept defaults instead of refusing everything.
+          yes '' | make -j$(($(nproc) + 1)) target/compile IGNORE_ERRORS="m n" BUILD_LOG=1 || \
+          yes '' | make -j1 target/compile V=s IGNORE_ERRORS=1
+          
+          # Compile packages after the target/kernel is successfully compiled.
           make package/compile -j$(($(nproc) + 1)) IGNORE_ERRORS=1 || make package/compile -j1 V=s IGNORE_ERRORS=1
           make package/index
 
