@@ -564,23 +564,15 @@ jobs:
         run: |
           cd $OPENWRT_ROOT_PATH
           
-          echo "Finalizing configuration and starting main compile..."
-          make defconfig
-          yes '' | make oldconfig
+          echo "Force-resolving KERNEL configuration non-interactively..."
+          # This command specifically enters the kernel build directory and resolves any new
+          # symbols (like PCIE_CADENCE_PLAT_EP) before the main compile starts.
+          # This is the definitive fix to prevent interactive prompts during the build.
+          yes '' | make target/linux/configure V=s
 
-          echo -e "\n$(nproc) Thread Compile"
-          make buildinfo
-          make diffconfig buildversion feedsversion
-          
-          # Pipe 'yes ""' directly into the main compile commands to auto-accept defaults for any new options.
-          # This is the most robust method to prevent interactive prompts from halting the build.
-          # The fallback is also changed from 'yes n' to 'yes ""' to accept defaults instead of refusing everything.
-          yes '' | make -j$(($(nproc) + 1)) target/compile IGNORE_ERRORS="m n" BUILD_LOG=1 || \
-          yes '' | make -j1 target/compile V=s IGNORE_ERRORS=1
-          
-          # Compile packages after the target/kernel is successfully compiled.
-          make package/compile -j$(($(nproc) + 1)) IGNORE_ERRORS=1 || make package/compile -j1 V=s IGNORE_ERRORS=1
-          make package/index
+          echo -e "\nStarting main firmware compile..."
+          # No 'yes' pipe is needed here because the kernel configuration is now fully resolved.
+          make -j$(($(nproc) + 1)) IGNORE_ERRORS="m n" BUILD_LOG=1 || make -j1 V=s IGNORE_ERRORS=1
 
       - name: Generate Firmware
         timeout-minutes: 60
