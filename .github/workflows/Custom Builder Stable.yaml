@@ -555,14 +555,14 @@ jobs:
           make checksum
 
       - name: Upload Config To Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Build-Config
           path: ${{ env.OPENWRT_ROOT_PATH }}/bin/build.config
           retention-days: 7
 
       - name: Upload Bin To Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ env.SOURCE_REPO }}-${{ env.DEVICE_NAME }}-${{ env.BUILD_DATE }}
           path: ${{ env.OPENWRT_ROOT_PATH }}/bin
