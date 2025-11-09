@@ -34,6 +34,7 @@ on:
           - openwrt.config-passwall
           - openwrt.config-custom
           - opi-cm4.config
+          - raspberry_pi_5.config
       config_link:
         description: "Use Config URL"
         type: boolean
